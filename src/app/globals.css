@@ -1,0 +1,121 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/*
+ * 다크 변형 — `.dark`를 조상에 걸면 자손이 다 다크가 된다.
+ * ⚠️ 이 프로젝트는 다크가 기본이지만, 라이트 토글도 지원한다(§CLAUDE.md 디자인 토큰).
+ */
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-geist-sans);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* 골목119 시맨틱 — 시연 시나리오·통과확률 배지 등 */
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  /* 지도 히트맵 색 단계 (통과확률: 초록 → 노랑 → 빨강) */
+  --color-heat-safe: var(--heat-safe);
+  --color-heat-warn: var(--heat-warn);
+  --color-heat-danger: var(--heat-danger);
+}
+
+/*
+ * ─────────────────────────────────────────
+ * 라이트 (옵션) — `<html>`에 `.dark`가 없으면 이 값
+ * ⚠️ `--background`·`--card` 둘 다 흰색. 카드는 얕은 그림자로 띄운다(§CLAUDE.md).
+ * ─────────────────────────────────────────
+ */
+:root {
+  --background: #ffffff;
+  --foreground: #1a1715;
+  --card: #ffffff;
+  --card-foreground: #1a1715;
+  --popover: #ffffff;
+  --popover-foreground: #1a1715;
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --secondary: #f5f5f4;
+  --secondary-foreground: #1a1715;
+  --muted: #fafaf9;
+  --muted-foreground: #78716c;
+  --accent: #f5f5f4;
+  --accent-foreground: #1a1715;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #e7e5e4;
+  --input: #e7e5e4;
+  --ring: #1a1715;
+
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --heat-safe: #22c55e;
+  --heat-warn: #f59e0b;
+  --heat-danger: #ef4444;
+
+  --radius: 0.5rem;
+}
+
+/*
+ * ─────────────────────────────────────────
+ * 다크 (기본) — `<html>.dark`에서 활성화
+ * ⚠️ **순검정 금지** — 최저값 `#1A1715`(§CLAUDE.md).
+ * ─────────────────────────────────────────
+ */
+.dark {
+  --background: #1a1715;
+  --foreground: #fafaf9;
+  --card: #242120;
+  --card-foreground: #fafaf9;
+  --popover: #242120;
+  --popover-foreground: #fafaf9;
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --secondary: #2e2a28;
+  --secondary-foreground: #fafaf9;
+  --muted: #2e2a28;
+  --muted-foreground: #a8a29e;
+  --accent: #2e2a28;
+  --accent-foreground: #fafaf9;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #33302d;
+  --input: #33302d;
+  --ring: #fafaf9;
+
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --heat-safe: #22c55e;
+  --heat-warn: #f59e0b;
+  --heat-danger: #ef4444;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+}
