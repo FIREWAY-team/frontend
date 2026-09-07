@@ -232,7 +232,8 @@ app/
 - [ ] **CCTV 판독 이미지 확보** — 유강현 담당, D-10까지 S3 업로드 여부
 - [ ] **시연 시나리오 3~5개 확정** — 위치·차량·기대 결과 · BE 시드 준비
 - [ ] **로그인 · 세션 방식** — httpOnly 쿠키 vs API 키 하드코딩
-- [ ] **배포** — Vercel 팀 계정 발급 vs 홍근 개인 계정
+- [ ] **배포 계정** — Vercel 팀 계정 발급 vs 홍근 개인 계정 (도메인은 확정됨, 아래 확정 항목 참고)
 - [ ] **Kakao Map 개발자 계정** — 팀 공용 발급 · 배포 도메인 등록
 - [ ] **LLM 실모델 선정 시점** — 예선 목 → 본선 실모델 전환 스케줄
 - [x] (확정) 스택=**Next.js 15 App Router** · 스타일=Tailwind+shadcn/ui · 상태=React Query + Zustand · 지도=Kakao Map · **1440 기준 + 다크 기본** · **실시간 없음(v2)** · **단일 사용자(MVP)**
+- [x] (확정, 2026-09-07) **배포 도메인 `fireroad.shop`** · `next.config.ts` `allowedOrigins` · `layout.tsx` `SITE_URL` 반영 · 카카오 JS SDK 도메인 등록 필요

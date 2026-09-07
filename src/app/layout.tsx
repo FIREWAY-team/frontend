@@ -16,13 +16,15 @@ const geistMono = Geist_Mono({
 });
 
 /**
- * ⚠️ 배포 도메인 확정 후 여기와 `next.config.ts`의 `allowedOrigins`를 함께 갱신한다.
- *    (Vercel 프리뷰 URL도 별도로 등록해야 Server Action이 안 막힌다.)
+ * ⚠️ 배포 도메인은 `fireroad.shop`이다(2026-09-07 확정). `next.config.ts`의
+ *    `allowedOrigins`와 함께 관리 — 하나만 바꾸면 Server Action이 Origin 불일치로 막힌다.
+ * ⚠️ **`??`가 아니라 `||`다** — env가 빈 문자열(`""`)로 잘못 심기면 `??`는 그걸 값으로 봐서
+ *    `new URL("")`이 던져 앱 전체가 죽는다. URL은 빈 문자열이 유효한 값일 수 없으므로 `||`가 안전.
  */
 const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ||
   (process.env.NODE_ENV === "production"
-    ? "https://golmok119.vercel.app"
+    ? "https://fireroad.shop"
     : "http://localhost:3000");
 
 export const metadata: Metadata = {
