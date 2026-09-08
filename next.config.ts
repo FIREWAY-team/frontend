@@ -33,9 +33,11 @@ const nextConfig: NextConfig = {
   experimental: {
     serverActions: {
       /*
-        ⚠️ 배포 도메인은 확정 후 여기 추가한다. Vercel 프리뷰 URL도 필요하면 별도로 등록.
+        ⚠️ 배포 도메인 `fireroad.shop` 확정(2026-09-07). 프록시 뒤에서 도메인으로 접속 시
+           Server Action이 Origin 불일치로 막힌다 — 두 서브도메인(apex · www) 다 등록해 두면
+           어느 쪽으로 들어와도 Action이 통과한다. Vercel 프리뷰 URL은 필요 시점에 추가.
       */
-      allowedOrigins: [],
+      allowedOrigins: ["fireroad.shop", "www.fireroad.shop"],
       bodySizeLimit: "10mb",
     },
   },
