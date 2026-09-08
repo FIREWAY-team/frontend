@@ -1,0 +1,23 @@
+FROM node:22-alpine AS builder
+WORKDIR /app
+ENV HUSKY=0
+COPY package.json ./
+RUN npm install
+COPY . .
+ARG NEXT_PUBLIC_SITE_URL
+ARG NEXT_PUBLIC_KAKAO_MAP_APP_KEY
+ARG NEXT_PUBLIC_USE_MOCK
+ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
+ENV NEXT_PUBLIC_KAKAO_MAP_APP_KEY=$NEXT_PUBLIC_KAKAO_MAP_APP_KEY
+ENV NEXT_PUBLIC_USE_MOCK=$NEXT_PUBLIC_USE_MOCK
+RUN npm run build
+
+FROM node:22-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+EXPOSE 3000
+CMD ["node","server.js"]
