@@ -7,6 +7,7 @@ import { KakaoCanvas } from "@/components/map/kakao-canvas";
 import type { Scenario } from "@/features/scenarios/types";
 import type { Vehicle } from "@/features/vehicles/types";
 
+import { useOsrmEnrichedRoutes } from "../hooks/use-osrm-enrich";
 import { MOCK_ROUTES } from "../mock/routes";
 import type { RouteCandidate } from "../types";
 import { CandidateCard } from "./candidate-card";
@@ -37,7 +38,10 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
   const [evidenceOpen, setEvidenceOpen] = useState(false);
 
   const scenario = scenarios.find((s) => s.id === selectedId) ?? null;
-  const routes = scenario ? (MOCK_ROUTES[scenario.id]?.routes ?? []) : [];
+  const mockRoutes = scenario ? (MOCK_ROUTES[scenario.id]?.routes ?? []) : [];
+  // 실 Valhalla 서버가 붙기 전 임시: OSRM 공용 라우터로 mock 좌표를 도로 shape 로 스냅.
+  // 지도 파란 폴리라인이 도로를 따라 굽게 하려는 것뿐, ETA/거리/통과확률 등 메타는 mock 그대로.
+  const routes = useOsrmEnrichedRoutes(mockRoutes);
   const decision: RouteCandidate | null =
     routes.find((r) => r.rank === decisionRank) ?? routes[0] ?? null;
   const candidates = routes.filter((r) => r.rank !== decisionRank);
