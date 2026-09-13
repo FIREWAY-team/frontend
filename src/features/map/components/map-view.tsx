@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { KakaoCanvas } from "@/components/map/kakao-canvas";
 import type { NoGoArea } from "@/features/no-go/types";
@@ -12,8 +12,6 @@ import { OverlayToggles } from "./overlay-toggles";
 
 interface MapViewProps {
   vehicles: Vehicle[];
-  /** 서버가 미리 받아둔 진입곤란 도로 (BFF). 실패 시 빈 배열. */
-  noGoAreas?: NoGoArea[];
 }
 
 /** 성남 중원구 대략 중심. */
@@ -25,14 +23,33 @@ const DEFAULT_CENTER = { lat: 37.432, lon: 127.145 };
  * ⚠️ CCTV 팝업은 시연용 시드 값 상시 노출. BE `/api/cctv/{id}` 실 연결 시 지도 위 마커 클릭
  *    이벤트로 열림 · 응답 필드(`effective_width_m` 등)에 맞춰 팝업 UI도 재구성 필요
  *    (§FE-BE 리포트 §🔴 §2).
- * ⚠️ no-go 오버레이는 서버 컴포넌트(`page.tsx`)가 미리 받아서 넘겨준다 — 브라우저는 BE 컨테이너에
- *    직접 못 붙는다(BFF). 데이터 갱신은 페이지 새로고침에 맡긴다(§staticdata PR #21).
+ * ⚠️ no-go 오버레이는 클라이언트 사이드에서 이 앱의 `/api/no-go` route handler 를 부른다.
+ *    Server Component 안에서 fetch 하는 방식은 Next.js 가 build-time SSG 로 뽑아 empty 결과가
+ *    static 으로 굳어버리는 사고가 있었다. Route Handler 는 요청마다 확실히 실행된다.
  */
-export function MapView({ vehicles, noGoAreas = [] }: MapViewProps) {
+export function MapView({ vehicles }: MapViewProps) {
   const [selectedVehicleId, setSelectedVehicleId] = useState(vehicles[0]?.id ?? "");
   const [showStaticNoGo, setShowStaticNoGo] = useState(true);
   const [showCctvReading, setShowCctvReading] = useState(true);
   const [popupOpen, setPopupOpen] = useState(true);
+  const [noGoAreas, setNoGoAreas] = useState<NoGoArea[]>([]);
+
+  useEffect(() => {
+    // 실패해도 지도는 그대로 뜬다. UI 는 오버레이 없이 성남 지도만 보이는 상태로 남는다.
+    let alive = true;
+    fetch("/api/no-go", { cache: "no-store" })
+      .then((r) => (r.ok ? (r.json() as Promise<NoGoArea[]>) : []))
+      .then((data) => {
+        if (alive) setNoGoAreas(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        /* 지도만 뜨게 두고 조용히 넘어간다. 서버 로그에는 warn 이 이미 찍혀 있다. */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   // 정적 PDF 소스(layer=1) 만 필터. CCTV 판독(layer=3)은 별도 오버레이 예정 — 지금은 데이터가 없음.
   const staticNoGo = noGoAreas.filter((a) => a.layer === 1);
 
