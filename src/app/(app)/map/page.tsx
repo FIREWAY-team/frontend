@@ -6,8 +6,10 @@ import { fetchNoGoAreas } from "@/features/no-go/api";
 import { MOCK_VEHICLES } from "@/features/vehicles/mock/vehicles";
 
 export const metadata = { title: "관할 지도" };
-// 진입곤란 데이터는 페이지 로드마다 서버에서 새로 받는다 — CCTV 판독이 정적 판정을 뒤집을 수
-// 있어서 캐시하면 안 된다(§staticdata PR #21 layer=3 항목).
+// 이 페이지는 절대 build-time 에 미리 렌더되면 안 된다 — 빌드 시점엔 BE 컨테이너가 없어서
+// fetch 가 조용히 빈 배열을 캐시하고 그게 static 으로 굳는다. 요청마다 서버에서 새로 그린다.
+// CCTV 판독(layer=3)이 정적 판정(layer=1)을 뒤집을 수 있는 도메인 이유도 그대로다(§staticdata PR #21).
+export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 /**
