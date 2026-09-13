@@ -1,14 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MapMarker, Polyline } from "react-kakao-maps-sdk";
 
 import { KakaoCanvas } from "@/components/map/kakao-canvas";
+import type { NoGoArea } from "@/features/no-go/types";
 import type { Scenario } from "@/features/scenarios/types";
 import type { Vehicle } from "@/features/vehicles/types";
 
-import { useOsrmEnrichedRoutes } from "../hooks/use-osrm-enrich";
-import { MOCK_ROUTES } from "../mock/routes";
+import { useRealRoutes } from "../hooks/use-real-routes";
 import type { RouteCandidate } from "../types";
 import { CandidateCard } from "./candidate-card";
 import { DecisionBanner } from "./decision-banner";
@@ -38,10 +38,26 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
   const [evidenceOpen, setEvidenceOpen] = useState(false);
 
   const scenario = scenarios.find((s) => s.id === selectedId) ?? null;
-  const mockRoutes = scenario ? (MOCK_ROUTES[scenario.id]?.routes ?? []) : [];
-  // 실 Valhalla 서버가 붙기 전 임시: OSRM 공용 라우터로 mock 좌표를 도로 shape 로 스냅.
-  // 지도 파란 폴리라인이 도로를 따라 굽게 하려는 것뿐, ETA/거리/통과확률 등 메타는 mock 그대로.
-  const routes = useOsrmEnrichedRoutes(mockRoutes);
+  // BE 진입곤란 도로 (§staticdata PR #21). 통과확률 계산에 쓴다.
+  const [noGoAreas, setNoGoAreas] = useState<NoGoArea[]>([]);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/no-go", { cache: "no-store" })
+      .then((r) => (r.ok ? (r.json() as Promise<NoGoArea[]>) : []))
+      .then((data) => {
+        if (alive) setNoGoAreas(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  // 실 Valhalla 서버가 붙기 전 임시: 프론트가 OSRM alternatives 로 소방서→화점 3개 경로를 실계산.
+  // 진입곤란 도로와의 근사 겹침으로 통과확률을 매기고 골든타임 5분 우선 정렬. ETA/거리는 OSRM 값.
+  const routes = useRealRoutes({
+    destination: scenario ? scenario.location : null,
+    noGoAreas,
+  });
   const decision: RouteCandidate | null =
     routes.find((r) => r.rank === decisionRank) ?? routes[0] ?? null;
   const candidates = routes.filter((r) => r.rank !== decisionRank);
