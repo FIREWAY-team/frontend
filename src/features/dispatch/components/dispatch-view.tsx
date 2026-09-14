@@ -8,7 +8,7 @@ import type { NoGoArea } from "@/features/no-go/types";
 import type { Scenario } from "@/features/scenarios/types";
 import type { Vehicle } from "@/features/vehicles/types";
 
-import { useRealRoutes } from "../hooks/use-real-routes";
+import { FIRE_STATION, useRealRoutes } from "../hooks/use-real-routes";
 import type { RouteCandidate } from "../types";
 import { CandidateCard } from "./candidate-card";
 import { DecisionBanner } from "./decision-banner";
@@ -102,7 +102,20 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
         />
 
         <div className="relative flex min-h-0 flex-1 flex-col">
-          <KakaoCanvas center={center} level={scenario ? 4 : 6}>
+          <KakaoCanvas center={center} level={scenario ? 5 : 6}>
+            {/* 소방서(출발점) — 시나리오가 선택된 순간부터 항상 표시해서 파란 경로의 시작점이
+                시각적으로 확인되게 한다. 실서비스에서는 화점에 가장 가까운 관할 소방서를 BE 가 선택. */}
+            {scenario && (
+              <MapMarker
+                position={{ lat: FIRE_STATION.lat, lng: FIRE_STATION.lon }}
+                title="성남소방서 (출발)"
+                image={{
+                  src: "data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='40' viewBox='0 0 32 40'%3E%3Cpath d='M16 0C7.2 0 0 7.2 0 16c0 12 16 24 16 24s16-12 16-24C32 7.2 24.8 0 16 0z' fill='%23dc2626'/%3E%3Ccircle cx='16' cy='16' r='6' fill='white'/%3E%3C/svg%3E",
+                  size: { width: 32, height: 40 },
+                  options: { offset: { x: 16, y: 40 } },
+                }}
+              />
+            )}
             {scenario && (
               <MapMarker
                 position={{ lat: scenario.location.lat, lng: scenario.location.lon }}

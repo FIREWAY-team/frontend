@@ -7,11 +7,11 @@ import type { NoGoArea } from "@/features/no-go/types";
 import type { RouteCandidate } from "../types";
 
 /**
- * 성남 관내 소방서 좌표 — 시연에서는 하나로 고정. 실 서비스에서는 화점에 가장 가까운 관할 소방서를
- * BE 가 선택해 넘긴다(§FRONTEND_SPEC §5-2).
- * 성남소방서(성남대로 아래) 좌표.
+ * 성남소방서 좌표 — 성남시 중원구 성남대로 997. Kakao 지도 기준 라벨 위치.
+ * 시연에서는 하나로 고정. 실 서비스에서는 화점에 가장 가까운 관할 소방서를 BE 가 선택해 넘긴다
+ * (§FRONTEND_SPEC §5-2).
  */
-const FIRE_STATION = { lat: 37.4238, lon: 127.1367 } as const;
+export const FIRE_STATION = { lat: 37.4283, lon: 127.1394 } as const;
 
 const GOLDEN_TIME_SEC = 300; // 5분
 const NO_GO_PROXIMITY_M = 25; // 경로 세그먼트가 no-go 도로에 이 거리 안으로 붙으면 겹친다고 본다
