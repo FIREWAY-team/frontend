@@ -26,10 +26,9 @@ const DEFAULT_CENTER = { lat: 37.432, lon: 127.145 };
 /**
  * `/dispatch` 화면 클라이언트 오케스트레이터.
  *
- * ⚠️ 실 BE 연결 시 `MOCK_ROUTES` 룩업이 `POST /api/route` 훅으로 대체된다. 화면 상태 흐름은
- *    그대로 유지 (§CLAUDE.md Mock → Live 격리막).
- * ⚠️ **BE `POST /api/route` 응답은 단일 경로 + waypoints**로 확인됨(§FE-BE 리포트 §🔴 §1).
- *    지금 후보 카드·순위 스왑 UX는 **팀장 답변 대기** — 답 오면 화면 재구성.
+ * ⚠️ 경로 계산은 **BE `POST /api/route` 1순위 · OSRM 폴백** (§useRealRoutes). BE routing-core v3
+ *    응답이 후보 배열 (rank·overlap_matrix·alternatives_status·meets_golden_time) 을 이미
+ *    포함 · 화면은 그 shape 그대로 소비 (§Mock → Live 격리막).
  */
 export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -52,20 +51,20 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
       alive = false;
     };
   }, []);
-  // 실 Valhalla 서버가 붙기 전 임시: 프론트가 OSRM alternatives 로 소방서→화점 3개 경로를 실계산.
-  // 진입곤란 도로와의 근사 겹침으로 통과확률을 매기고 골든타임 5분 우선 정렬. ETA/거리는 OSRM 값.
+  const vehicle = useMemo(
+    () => (scenario ? (vehicles.find((v) => v.id === scenario.vehicleHint) ?? null) : null),
+    [scenario, vehicles],
+  );
+  // BE `POST /api/route` 1순위 · 실패 시 OSRM 폴백 (§useRealRoutes).
   const routes = useRealRoutes({
     destination: scenario ? scenario.location : null,
+    vehicleId: vehicle?.id ?? null,
     noGoAreas,
   });
   const decision: RouteCandidate | null =
     routes.find((r) => r.rank === decisionRank) ?? routes[0] ?? null;
   const candidates = routes.filter((r) => r.rank !== decisionRank);
   const previewing = previewingRank !== null ? routes.find((r) => r.rank === previewingRank) : null;
-  const vehicle = useMemo(
-    () => (scenario ? (vehicles.find((v) => v.id === scenario.vehicleHint) ?? null) : null),
-    [scenario, vehicles],
-  );
 
   const center = scenario ? scenario.location : DEFAULT_CENTER;
 
@@ -153,7 +152,7 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
 }
 
 /**
- * MOCK_ROUTES는 `[lon, lat]` GeoJSON 관례로 저장 · Kakao는 `{lat, lng}` 객체를 원함. 변환.
+ * `[lon, lat]` GeoJSON 좌표 → Kakao `{lat, lng}` 객체. 지도에 넣기 직전 한 곳에서만 스왑한다.
  *
  * ⚠️ 이 변환을 한 곳에 몰아둬야 좌표 순서 사고를 막는다. 지도에 넣는 자리마다 순서를 새로
  *    쓰기 시작하면 어느 시점에 실수 하나로 폴리라인이 태평양에 그려진다.

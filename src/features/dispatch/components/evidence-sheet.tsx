@@ -55,12 +55,12 @@ export function EvidenceSheet({ candidate, onClose }: EvidenceSheetProps) {
             </div>
             <ul className="flex flex-col gap-2">
               {candidate.excludedReasons.map((r) => (
-                <li key={r.edgeId} className="border-border flex gap-3 rounded-md border p-2.5">
+                <li key={r.polygonId} className="border-border flex gap-3 rounded-md border p-2.5">
                   {r.evidenceUrl && (
                     <div className="border-border bg-muted relative h-16 w-24 shrink-0 overflow-hidden rounded border">
                       <Image
                         src={r.evidenceUrl}
-                        alt={`제외 링크 ${r.edgeId} 증거 이미지`}
+                        alt={`제외 링크 ${r.polygonId} 증거 이미지`}
                         fill
                         sizes="96px"
                         className="object-cover"
@@ -69,7 +69,9 @@ export function EvidenceSheet({ candidate, onClose }: EvidenceSheetProps) {
                     </div>
                   )}
                   <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <div className="text-muted-foreground font-mono text-[10.5px]">{r.edgeId}</div>
+                    <div className="text-muted-foreground font-mono text-[10.5px]">
+                      {r.polygonId}
+                    </div>
                     <div className="text-foreground text-[12px]">{r.reason}</div>
                   </div>
                 </li>

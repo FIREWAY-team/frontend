@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import type { NoGoArea } from "@/features/no-go/types";
 
-import type { RouteCandidate } from "../types";
+import type { RouteCandidate, RouteResponse } from "../types";
 
 /**
  * 성남 관내 소방서 좌표 — 시연에서는 하나로 고정. 실 서비스에서는 화점에 가장 가까운 관할 소방서를
@@ -18,95 +18,142 @@ const NO_GO_PROXIMITY_M = 25; // 경로 세그먼트가 no-go 도로에 이 거�
 
 interface UseRealRoutesInput {
   destination: { lat: number; lon: number } | null;
+  vehicleId: string | null;
   noGoAreas: NoGoArea[];
 }
 
 /**
- * 화점 좌표를 받아 소방서 → 화점 실경로 3개를 OSRM alternatives 로 계산하고, 각 경로가 진입곤란
- * 도로와 얼마나 겹치는지 근사로 통과확률을 매긴다. 골든타임(300초) 만족 후보를 상위로 정렬.
+ * 화점 좌표를 받아 소방서 → 화점 경로 후보를 계산한다.
  *
- * ⚠️ 이건 시연 임시 — 실서비스에서는 BE `POST /api/route` 응답을 그대로 쓴다. Valhalla 실서버가
- *    안 붙어 있는 사이 시연이 가짜로 보이지 않게 프론트가 공용 라우터를 대신 부르는 것.
+ * ⚠️ **1순위: BE `POST /api/route`** — Valhalla 기반 실서비스 계산. `passableProb` 는 CCTV
+ *    판독·차량 제원까지 결합해 나온 값.
+ * ⚠️ **2순위: OSRM alternatives** — BE 다운·타임아웃 시 프론트가 공용 라우터로 대신 계산 · 진입
+ *    곤란 도로와의 근사 겹침으로 통과확률을 매긴다. 시연이 가짜로 보이지 않게 하는 안전망.
  * ⚠️ OSRM 공용 인스턴스는 데모용 SLA — 초당 1회 rate limit, 다운 있을 수 있음. 실패 시 빈 배열.
- * ⚠️ 통과확률은 진짜 CCTV 판독이 아니라 정적 no-go 도로와의 근사 겹침 비율에서 온 값이다. 실서비스
- *    에서는 BE 가 CCTV·차량 제원까지 결합해 계산한 값을 그대로 받는다.
+ * ⚠️ vehicleId 가 없으면 BE 호출을 건너뛰고 바로 OSRM 로 간다 (BE 는 vehicleId 필수).
  */
-export function useRealRoutes({ destination, noGoAreas }: UseRealRoutesInput): RouteCandidate[] {
+export function useRealRoutes({
+  destination,
+  vehicleId,
+  noGoAreas,
+}: UseRealRoutesInput): RouteCandidate[] {
   const [snapshot, setSnapshot] = useState<{ key: string; value: RouteCandidate[] }>({
     key: "",
     value: [],
   });
-  const key = destination ? `${destination.lat},${destination.lon}|${noGoAreas.length}` : "";
+  const key = destination
+    ? `${destination.lat},${destination.lon}|${vehicleId ?? ""}|${noGoAreas.length}`
+    : "";
 
   useEffect(() => {
     let alive = true;
-    if (!destination) return; // 반환 값은 key 비교로 이미 [] 를 돌려주고 있다 — effect 안에서 초기화 setState 하지 않는다.
+    if (!destination) return;
     (async () => {
-      const url =
-        `https://router.project-osrm.org/route/v1/driving/` +
-        `${FIRE_STATION.lon},${FIRE_STATION.lat};${destination.lon},${destination.lat}` +
-        `?overview=full&geometries=geojson&alternatives=3&steps=false`;
-      try {
-        const res = await fetch(url, { cache: "no-store" });
-        if (!res.ok) {
-          if (alive) setSnapshot({ key, value: [] });
+      // 1순위: BE 호출
+      if (vehicleId) {
+        const beRoutes = await fetchBeRoutes({ destination, vehicleId });
+        if (!alive) return;
+        if (beRoutes && beRoutes.length > 0) {
+          setSnapshot({ key, value: beRoutes });
           return;
         }
-        const data = (await res.json()) as OsrmResponse;
-        const rawRoutes = data.routes ?? [];
-        if (rawRoutes.length === 0) {
-          if (alive) setSnapshot({ key, value: [] });
-          return;
-        }
-        // 경로별로 no-go 겹침을 근사해 통과확률을 낸다. 그리고 골든타임 우선 정렬.
-        const scored = rawRoutes.map((rr, i) => {
-          const coords = (rr.geometry?.coordinates ?? []).filter(
-            (pt): pt is [number, number] =>
-              Array.isArray(pt) &&
-              pt.length === 2 &&
-              typeof pt[0] === "number" &&
-              typeof pt[1] === "number",
-          );
-          const distanceM = Math.round(rr.distance ?? 0);
-          const etaSec = Math.round(rr.duration ?? 0);
-          const overlap = overlapRatio(coords, noGoAreas, NO_GO_PROXIMITY_M);
-          // 통과확률: 겹침이 0이면 0.94~0.98, 겹치는 만큼 떨어짐. 완전 겹치면 0.2 근처.
-          const passableProb = Math.max(0.2, 0.96 - overlap * 0.75);
-          const meetsGolden = etaSec <= GOLDEN_TIME_SEC;
-          return {
-            _raw: { i, meetsGolden, etaSec },
-            candidate: {
-              rank: 0, // sort 후에 채운다
-              coordinates: coords,
-              etaSec,
-              distanceM,
-              passableProb,
-              explanation: explain({ meetsGolden, etaSec, overlap, altIndex: i }),
-              excludedReasons: [],
-            } satisfies RouteCandidate,
-          };
-        });
-        // 정렬: (1) 골든타임 만족 우선 (2) 통과확률 내림 (3) ETA 오름.
-        scored.sort((a, b) => {
-          if (a._raw.meetsGolden !== b._raw.meetsGolden) return a._raw.meetsGolden ? -1 : 1;
-          if (a.candidate.passableProb !== b.candidate.passableProb)
-            return b.candidate.passableProb - a.candidate.passableProb;
-          return a.candidate.etaSec - b.candidate.etaSec;
-        });
-        const finalRoutes = scored.map((s, i) => ({ ...s.candidate, rank: i + 1 }));
-        if (alive) setSnapshot({ key, value: finalRoutes });
-      } catch {
-        if (alive) setSnapshot({ key, value: [] });
       }
+      // 2순위: OSRM 폴백
+      const osrmRoutes = await fetchOsrmRoutes({ destination, noGoAreas });
+      if (alive) setSnapshot({ key, value: osrmRoutes });
     })();
 
     return () => {
       alive = false;
     };
-  }, [key, destination, noGoAreas]);
+  }, [key, destination, vehicleId, noGoAreas]);
 
   // key 가 바뀐 직후 아직 응답이 오기 전이면 빈 배열(loading). 스냅샷 key 와 일치할 때만 반환.
   return snapshot.key === key ? snapshot.value : [];
+}
+
+/**
+ * BE `/api/route` BFF 호출. 응답 성공하면 후보 배열 · 실패 시 `null`.
+ * ⚠️ BFF 가 실패 (502) 하면 null 로 넘어와 호출부가 OSRM 폴백으로 간다.
+ */
+async function fetchBeRoutes(input: {
+  destination: { lat: number; lon: number };
+  vehicleId: string;
+}): Promise<RouteCandidate[] | null> {
+  try {
+    const res = await fetch("/api/route", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        vehicleId: input.vehicleId,
+        from: { lat: FIRE_STATION.lat, lon: FIRE_STATION.lon },
+        to: { lat: input.destination.lat, lon: input.destination.lon },
+      }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as RouteResponse;
+    return Array.isArray(data.routes) ? data.routes : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * OSRM alternatives 폴백 — no-go 겹침 근사로 통과확률을 매기고 골든타임 우선 정렬.
+ */
+async function fetchOsrmRoutes(input: {
+  destination: { lat: number; lon: number };
+  noGoAreas: NoGoArea[];
+}): Promise<RouteCandidate[]> {
+  const { destination, noGoAreas } = input;
+  const url =
+    `https://router.project-osrm.org/route/v1/driving/` +
+    `${FIRE_STATION.lon},${FIRE_STATION.lat};${destination.lon},${destination.lat}` +
+    `?overview=full&geometries=geojson&alternatives=3&steps=false`;
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return [];
+    const data = (await res.json()) as OsrmResponse;
+    const rawRoutes = data.routes ?? [];
+    if (rawRoutes.length === 0) return [];
+    const scored = rawRoutes.map((rr, i) => {
+      const coords = (rr.geometry?.coordinates ?? []).filter(
+        (pt): pt is [number, number] =>
+          Array.isArray(pt) &&
+          pt.length === 2 &&
+          typeof pt[0] === "number" &&
+          typeof pt[1] === "number",
+      );
+      const distanceM = Math.round(rr.distance ?? 0);
+      const etaSec = Math.round(rr.duration ?? 0);
+      const overlap = overlapRatio(coords, noGoAreas, NO_GO_PROXIMITY_M);
+      const passableProb = Math.max(0.2, 0.96 - overlap * 0.75);
+      const meetsGolden = etaSec <= GOLDEN_TIME_SEC;
+      return {
+        _raw: { i, meetsGolden, etaSec },
+        candidate: {
+          rank: 0,
+          coordinates: coords,
+          etaSec,
+          distanceM,
+          passableProb,
+          meetsGoldenTime: meetsGolden,
+          explanation: explain({ meetsGolden, etaSec, overlap, altIndex: i }),
+          excludedReasons: [],
+        } satisfies RouteCandidate,
+      };
+    });
+    scored.sort((a, b) => {
+      if (a._raw.meetsGolden !== b._raw.meetsGolden) return a._raw.meetsGolden ? -1 : 1;
+      if (a.candidate.passableProb !== b.candidate.passableProb)
+        return b.candidate.passableProb - a.candidate.passableProb;
+      return a.candidate.etaSec - b.candidate.etaSec;
+    });
+    return scored.map((s, i) => ({ ...s.candidate, rank: i + 1 }));
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -122,13 +169,11 @@ function overlapRatio(
   thresholdM: number,
 ): number {
   if (pathCoords.length < 2 || noGo.length === 0) return 0;
-  // path 세그먼트 개수 대비 겹친 세그먼트 개수 비율.
   const pathSegs = segmentsFrom(pathCoords);
   if (pathSegs.length === 0) return 0;
-  // no-go 세그먼트 전부를 flat 하게 모아둔다.
   const noGoSegs: Array<[number, number, number, number]> = [];
   for (const area of noGo) {
-    if (area.verificationStatus !== "ok") continue; // unverified 는 라우팅 계산에서 제외
+    if (area.verificationStatus !== "ok") continue;
     const segs = segmentsFrom(area.path);
     for (const s of segs) noGoSegs.push(s);
   }
@@ -138,7 +183,6 @@ function overlapRatio(
   for (const [ax, ay, bx, by] of pathSegs) {
     const midLon = (ax + bx) / 2;
     const midLat = (ay + by) / 2;
-    // 이 세그먼트가 어느 no-go 세그먼트라도 threshold 안이면 hit.
     for (const [nx1, ny1, nx2, ny2] of noGoSegs) {
       const nMidLon = (nx1 + nx2) / 2;
       const nMidLat = (ny1 + ny2) / 2;
@@ -181,7 +225,7 @@ function explain(a: {
   if (a.overlap > 0.2) parts.push("진입곤란 도로 다수 통과");
   else if (a.overlap > 0.05) parts.push("진입곤란 구간 소수 포함");
   else parts.push("진입곤란 구간 회피");
-  parts.push(a.altIndex === 0 ? "OSRM 최단 경로" : `OSRM 대안 ${a.altIndex}`);
+  parts.push(a.altIndex === 0 ? "OSRM 최단 경로 · 폴백" : `OSRM 대안 ${a.altIndex} · 폴백`);
   return parts.join(" · ");
 }
 
