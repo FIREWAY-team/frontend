@@ -36,6 +36,8 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
   const [previewingRank, setPreviewingRank] = useState<number | null>(null);
   const [decisionRank, setDecisionRank] = useState<number>(1);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+  // 차량 선택 — 시나리오의 vehicleHint 를 기본값으로 하고 사용자가 상단 셀렉트로 바꿀 수 있다.
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
 
   const scenario = scenarios.find((s) => s.id === selectedId) ?? null;
   // BE 진입곤란 도로 (§staticdata PR #21). 통과확률 계산에 쓴다.
@@ -52,20 +54,25 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
       alive = false;
     };
   }, []);
+  // 시나리오가 바뀌면 그 힌트 차량으로 선택 초기화. 사용자가 이후 직접 바꾸면 그 선택 유지.
+  const activeVehicleId = selectedVehicleId ?? scenario?.vehicleHint ?? vehicles[0]?.id ?? "";
+  const vehicle = useMemo(
+    () => vehicles.find((v) => v.id === activeVehicleId) ?? null,
+    [vehicles, activeVehicleId],
+  );
+  const vehicleWidthM = vehicle?.width ?? 2.5;
+
   // 실 Valhalla 서버가 붙기 전 임시: 프론트가 OSRM alternatives 로 소방서→화점 3개 경로를 실계산.
   // 진입곤란 도로와의 근사 겹침으로 통과확률을 매기고 골든타임 5분 우선 정렬. ETA/거리는 OSRM 값.
   const routes = useRealRoutes({
     destination: scenario ? scenario.location : null,
     noGoAreas,
+    vehicleWidthM,
   });
   const decision: RouteCandidate | null =
     routes.find((r) => r.rank === decisionRank) ?? routes[0] ?? null;
   const candidates = routes.filter((r) => r.rank !== decisionRank);
   const previewing = previewingRank !== null ? routes.find((r) => r.rank === previewingRank) : null;
-  const vehicle = useMemo(
-    () => (scenario ? (vehicles.find((v) => v.id === scenario.vehicleHint) ?? null) : null),
-    [scenario, vehicles],
-  );
 
   const center = scenario ? scenario.location : DEFAULT_CENTER;
 
@@ -74,6 +81,7 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
     setDecisionRank(1);
     setPreviewingRank(null);
     setEvidenceOpen(false);
+    setSelectedVehicleId(null); // 새 시나리오는 해당 힌트 차량으로 자동 리셋
   }
 
   function handlePreview(rank: number) {
@@ -95,6 +103,32 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
 
       {/* 우측 · 결정 배너 + 지도 + 후보 카드 */}
       <section className="flex min-w-0 flex-1 flex-col gap-3 p-4">
+        {/* 차량 선택 — 폭 기준으로 경로가 재계산된다. 시나리오 힌트 차량이 기본. */}
+        {scenario && (
+          <div className="border-border bg-surface flex items-center gap-3 rounded-md border px-3 py-2">
+            <span className="text-muted-foreground text-[11.5px]">차량</span>
+            <div className="flex gap-1.5">
+              {vehicles.map((v) => (
+                <button
+                  key={v.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedVehicleId(v.id);
+                    setDecisionRank(1);
+                    setPreviewingRank(null);
+                  }}
+                  className={
+                    v.id === activeVehicleId
+                      ? "border-primary bg-primary/10 rounded border px-2.5 py-1 text-[11.5px]"
+                      : "border-border text-muted-foreground hover:bg-surface-2 rounded border px-2.5 py-1 text-[11.5px]"
+                  }
+                >
+                  {v.name} · {v.width}m
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <DecisionBanner
           decision={decision}
           vehicleName={vehicle?.name}
@@ -126,9 +160,10 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
               <Polyline
                 path={toKakaoPath(decision.coordinates)}
                 strokeWeight={6}
-                strokeColor="#6B9BD1"
+                // 통과 가능한 결정 경로는 파랑, 진입불가 경로만 남았을 때 (모두 우회 불가) 는 빨강.
+                strokeColor={decision.passableForVehicle === false ? "#ef4444" : "#6B9BD1"}
                 strokeOpacity={0.95}
-                strokeStyle="solid"
+                strokeStyle={decision.passableForVehicle === false ? "shortdash" : "solid"}
               />
             )}
             {previewing && (
