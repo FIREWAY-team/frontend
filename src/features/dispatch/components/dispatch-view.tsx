@@ -1,14 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { MapMarker, Polyline } from "react-kakao-maps-sdk";
 
 import { KakaoCanvas } from "@/components/map/kakao-canvas";
-import type { NoGoArea } from "@/features/no-go/types";
 import type { Scenario } from "@/features/scenarios/types";
 import type { Vehicle } from "@/features/vehicles/types";
 
-import { FIRE_STATION, useRealRoutes } from "../hooks/use-real-routes";
+import { FIRE_STATION, useBackendRoutes } from "../hooks/use-backend-routes";
 import type { RouteCandidate } from "../types";
 import { CandidateCard } from "./candidate-card";
 import { DecisionBanner } from "./decision-banner";
@@ -40,34 +39,18 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
 
   const scenario = scenarios.find((s) => s.id === selectedId) ?? null;
-  // BE 진입곤란 도로 (§staticdata PR #21). 통과확률 계산에 쓴다.
-  const [noGoAreas, setNoGoAreas] = useState<NoGoArea[]>([]);
-  useEffect(() => {
-    let alive = true;
-    fetch("/api/no-go", { cache: "no-store" })
-      .then((r) => (r.ok ? (r.json() as Promise<NoGoArea[]>) : []))
-      .then((data) => {
-        if (alive) setNoGoAreas(Array.isArray(data) ? data : []);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, []);
   // 시나리오가 바뀌면 그 힌트 차량으로 선택 초기화. 사용자가 이후 직접 바꾸면 그 선택 유지.
   const activeVehicleId = selectedVehicleId ?? scenario?.vehicleHint ?? vehicles[0]?.id ?? "";
   const vehicle = useMemo(
     () => vehicles.find((v) => v.id === activeVehicleId) ?? null,
     [vehicles, activeVehicleId],
   );
-  const vehicleWidthM = vehicle?.width ?? 2.5;
 
-  // 실 Valhalla 서버가 붙기 전 임시: 프론트가 OSRM alternatives 로 소방서→화점 3개 경로를 실계산.
-  // 진입곤란 도로와의 근사 겹침으로 통과확률을 매기고 골든타임 5분 우선 정렬. ETA/거리는 OSRM 값.
-  const routes = useRealRoutes({
+  // BE 가 3층 의사결정(정적 no-go × CCTV verdict × 차량 폭)을 이미 매겨서 내려준다 (§backend PR #24).
+  // 프론트는 렌더만. 옛 프론트-계산 훅(use-real-routes / use-osrm-enrich) 은 backend PR #24 로 함께 걷혔다.
+  const routes = useBackendRoutes({
     destination: scenario ? scenario.location : null,
-    noGoAreas,
-    vehicleWidthM,
+    vehicleId: activeVehicleId,
   });
   const decision: RouteCandidate | null =
     routes.find((r) => r.rank === decisionRank) ?? routes[0] ?? null;
