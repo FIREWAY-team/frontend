@@ -1,7 +1,7 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
-import { LayoutDashboard, MapPinned, Truck } from "lucide-react";
+import { LayoutDashboard, MapPinned, Play, Truck } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -15,6 +15,7 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
+  { href: "/live", label: "라이브 시연", icon: Play },
   { href: "/dispatch", label: "상황실", icon: LayoutDashboard },
   { href: "/map", label: "관할 지도", icon: MapPinned },
   { href: "/vehicles", label: "차량 관리", icon: Truck },
