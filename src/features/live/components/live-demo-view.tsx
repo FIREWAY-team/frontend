@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { CustomOverlayMap, MapMarker, Polyline } from "react-kakao-maps-sdk";
 
 import { KakaoCanvas } from "@/components/map/kakao-canvas";
+import type { Incident } from "@/features/incidents/types";
 
 import {
   type Alley,
@@ -15,6 +16,10 @@ import {
   type StepId,
   type Verdict,
 } from "../moran-scenario";
+
+/** 라이브 시연 A · 모란기름골목 화점 정적 주소 · 신고 접수 payload 로 사용. */
+const MORAN_INCIDENT_ADDRESS = "경기 성남시 중원구 둔촌대로69번길 8 일대";
+const MORAN_INCIDENT_SUMMARY = "모란기름골목 화재 발생 · 인근 노점 밀집 · 연기 확산";
 
 const STEPS: StepId[] = [1, 2, 3, 4, 5];
 const GOLDEN_ROUTE = ALT_ROUTES.find((r) => r.id === "A");
@@ -40,10 +45,50 @@ export function LiveDemoView() {
   const selectedAlley = alleySnap.key === step ? alleySnap.alley : null;
   const [aiSnap, setAiSnap] = useState<{ key: StepId; loaded: boolean }>({ key: 1, loaded: false });
   const aiLoaded = aiSnap.key === step && aiSnap.loaded;
+  // 실제 접수된 신고 · null 이면 아직 접수 전이거나 BE 실패 (조용히 fallthrough).
+  const [incident, setIncident] = useState<Incident | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const go = useCallback((next: StepId) => {
     if (typeof window !== "undefined") window.location.hash = `step=${next}`;
   }, []);
+
+  /**
+   * 1단계 · "출동하기" · BE `/api/incidents` 실호출 → `incident_no` 저장 후 2단계 이동.
+   *
+   * ⚠️ **BE 실패해도 시연 흐름은 이어진다** — null 로 두고 2단계 진입. 시연 신뢰성이 접수 성공보다
+   *    우선 (§CLAUDE.md 정직성 · 라이브 시연 규약). 실패는 console.warn 만.
+   * ⚠️ 화점 좌표는 `FIRE_POINT` (moran-scenario.ts) 정적 · 실서비스라면 화점 좌표는 신고 접수
+   *    화면에서 사용자가 지도 클릭으로 지정.
+   */
+  const dispatchWithIncidentSubmit = useCallback(async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/incidents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          address: MORAN_INCIDENT_ADDRESS,
+          lat: FIRE_POINT.lat,
+          lon: FIRE_POINT.lon,
+          summary: MORAN_INCIDENT_SUMMARY,
+        }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as Incident;
+        setIncident(data);
+      } else {
+        console.warn(`[live] 신고 접수 실패: HTTP ${res.status} · 시연 계속`);
+      }
+    } catch (err) {
+      const name = err instanceof Error ? err.name : "unknown";
+      console.warn(`[live] 신고 접수 오류: ${name} · 시연 계속`);
+    } finally {
+      setSubmitting(false);
+      go(2);
+    }
+  }, [submitting, go]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -186,8 +231,10 @@ export function LiveDemoView() {
         </KakaoCanvas>
 
         {/* 스텝별 오버레이 카드 */}
-        {step === 1 && <StepOneCard onDispatch={() => go(2)} />}
-        {step === 2 && <StepTwoCard onNext={() => go(3)} />}
+        {step === 1 && (
+          <StepOneCard onDispatch={dispatchWithIncidentSubmit} submitting={submitting} />
+        )}
+        {step === 2 && <StepTwoCard onNext={() => go(3)} incident={incident} />}
         {step === 3 && (
           <StepThreeCard
             loaded={aiLoaded}
@@ -196,8 +243,20 @@ export function LiveDemoView() {
             onNext={() => go(4)}
           />
         )}
-        {step === 4 && <StepFourCard onNext={() => go(5)} />}
+        {step === 4 && <StepFourCard onNext={() => go(5)} incident={incident} />}
         {step === 5 && <StepFiveCard onRestart={() => go(1)} />}
+
+        {/* 접수 번호 상단 우측 · 2단계 이후 항상 노출 · "실 접수됐다" 신호 */}
+        {step >= 2 && incident && (
+          <div className="absolute top-3 right-3 z-10 flex items-center gap-2 rounded-full border border-neutral-300 bg-white/95 px-3 py-1.5 text-[11px] shadow-md backdrop-blur-sm">
+            <span className="rounded-full bg-emerald-500 px-1.5 py-0.5 text-[9.5px] font-bold text-white">
+              접수 완료
+            </span>
+            <span className="font-mono text-[11px] font-semibold text-neutral-900">
+              {incident.incidentNo}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -237,7 +296,7 @@ function verdictBadge(v: Verdict) {
   return "border-red-600 bg-red-50 text-red-900";
 }
 
-function StepOneCard({ onDispatch }: { onDispatch: () => void }) {
+function StepOneCard({ onDispatch, submitting }: { onDispatch: () => void; submitting: boolean }) {
   return (
     <div className="absolute right-5 bottom-5 z-10 w-[340px] rounded-lg border-2 border-red-500 bg-white shadow-2xl">
       <div className="flex items-center gap-2 bg-red-500 px-3 py-2 text-white">
@@ -255,22 +314,40 @@ function StepOneCard({ onDispatch }: { onDispatch: () => void }) {
         <button
           type="button"
           onClick={onDispatch}
-          className="mt-3 w-full rounded-md bg-red-500 py-2 text-[13px] font-semibold text-white hover:bg-red-600"
+          disabled={submitting}
+          aria-disabled={submitting}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-md bg-red-500 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-70"
         >
-          출동하기 →
+          {submitting ? (
+            <>
+              <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              접수 요청 중…
+            </>
+          ) : (
+            <>출동하기 →</>
+          )}
         </button>
       </div>
     </div>
   );
 }
 
-function StepTwoCard({ onNext }: { onNext: () => void }) {
+function StepTwoCard({ onNext, incident }: { onNext: () => void; incident: Incident | null }) {
   return (
     <div className="absolute right-5 bottom-5 z-10 w-[320px] rounded-lg border border-neutral-300 bg-white p-4 shadow-xl">
       <div className="text-[12px] font-semibold text-neutral-900">🚒 현장 대로 도착</div>
       <div className="mt-1 text-[11.5px] text-neutral-700">
         소방서 → 대로변 이동 완료. 화점까지 골목 진입 필요.
       </div>
+      {incident && (
+        <div className="mt-2 flex items-center gap-2 rounded bg-neutral-50 px-2 py-1.5 text-[10.5px] text-neutral-600">
+          <span className="rounded-sm bg-emerald-500 px-1 py-0.5 text-[9px] font-bold text-white">
+            접수
+          </span>
+          <span className="font-mono">{incident.incidentNo}</span>
+          <span className="ml-auto">{incident.status}</span>
+        </div>
+      )}
       <div className="mt-3 rounded-md bg-red-50 p-3 text-center">
         <div className="text-[14px] font-bold text-red-900">대로 도착 5분. 어느 골목으로?</div>
       </div>
@@ -366,7 +443,7 @@ function VehicleVerdictRow({ label, verdict }: { label: string; verdict: Verdict
   );
 }
 
-function StepFourCard({ onNext }: { onNext: () => void }) {
+function StepFourCard({ onNext, incident }: { onNext: () => void; incident: Incident | null }) {
   return (
     <div className="absolute right-5 bottom-5 z-10 w-[320px] rounded-lg border-2 border-blue-500 bg-white p-4 shadow-2xl">
       <div className="flex items-center gap-2">
@@ -375,6 +452,14 @@ function StepFourCard({ onNext }: { onNext: () => void }) {
         </span>
         <span className="text-[13px] font-bold text-neutral-900">골든레인 · L1 → L2</span>
       </div>
+      {incident && (
+        <div className="mt-2 flex items-center gap-2 rounded bg-neutral-50 px-2 py-1.5 text-[10.5px] text-neutral-600">
+          <span className="rounded-sm bg-emerald-500 px-1 py-0.5 text-[9px] font-bold text-white">
+            접수
+          </span>
+          <span className="font-mono">{incident.incidentNo}</span>
+        </div>
+      )}
       <div className="mt-3 grid grid-cols-3 gap-2 text-center">
         <Stat label="ETA" value="5:30" />
         <Stat label="거리" value="1.5 km" />
