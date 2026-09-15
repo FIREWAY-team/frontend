@@ -3,6 +3,7 @@ name: frontend-image
 on:
   push:
     branches: [ develop, main, 'feature/**' ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -23,7 +24,11 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/fireway-team/frontend:latest
+          # sha 태그도 같이 밀어서 `latest` 가 이상하게 옛 이미지를 가리키는 사고가 나도
+          # 특정 커밋 이미지로 복구할 수 있게 한다. 서버 배포는 `latest` 를 그대로 쓴다.
+          tags: |
+            ghcr.io/fireway-team/frontend:latest
+            ghcr.io/fireway-team/frontend:${{ github.sha }}
           build-args: |
             NEXT_PUBLIC_SITE_URL=https://fireroad.shop
             NEXT_PUBLIC_USE_MOCK=true

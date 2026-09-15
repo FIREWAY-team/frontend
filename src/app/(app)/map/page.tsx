@@ -8,7 +8,9 @@ export const metadata = { title: "관할 지도" };
 
 /**
  * `/map` — 관할 지도 · 오버레이 토글 + 골목 팝업.
- * ⚠️ 실 지도 SDK 연결은 별도 이슈.
+ *
+ * ⚠️ no-go 데이터는 `MapView` 가 mount 후 `/api/no-go` 로 클라이언트에서 부른다. 서버 사이드
+ *    fetch 는 Next.js SSG 로 뽑혀 empty 결과가 static HTML 로 굳는 사고가 있었다.
  */
 export default function MapPage() {
   return (

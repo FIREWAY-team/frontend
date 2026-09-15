@@ -26,11 +26,13 @@ export function CandidateCard({ candidate, previewing, onPreview, onPromote }: C
   const etaMin = Math.floor(candidate.etaSec / 60);
   const etaSec = candidate.etaSec % 60;
 
+  const impassable = candidate.passableForVehicle === false;
   return (
     <div
       className={cn(
         "border-border bg-surface flex min-w-0 flex-1 flex-col gap-2 rounded-md border p-3 transition-colors",
         previewing && "border-primary/50 bg-surface-2",
+        impassable && "opacity-70",
       )}
     >
       <div className="flex items-start justify-between gap-2">
@@ -42,6 +44,11 @@ export function CandidateCard({ candidate, previewing, onPreview, onPromote }: C
             {probPct}
             <span className="text-muted-foreground ml-0.5 text-[11px]">%</span>
           </span>
+          {impassable && (
+            <span className="bg-danger/15 text-danger rounded px-1.5 py-0.5 text-[10px] font-medium">
+              차량 진입 불가
+            </span>
+          )}
         </div>
         <div className="text-muted-foreground tabular flex flex-col items-end text-[11px]">
           <span>

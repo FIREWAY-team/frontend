@@ -1,11 +1,14 @@
-import { ArrowLeft, MapPinned, Truck } from "lucide-react";
+import { ArrowLeft, Truck } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppHeader } from "@/components/layout/app-header";
-import { MapPlaceholder } from "@/features/map/components/map-placeholder";
+import { KakaoCanvas } from "@/components/map/kakao-canvas";
 import { MOCK_VEHICLES } from "@/features/vehicles/mock/vehicles";
 import { VEHICLE_SIZE_LABEL } from "@/features/vehicles/types";
+
+/** 성남 중원구 대략 중심 — 커버리지 썸네일 기본 자리. */
+const DEFAULT_CENTER = { lat: 37.432, lon: 127.145 };
 
 interface Props {
   params: Promise<{ vehicleId: string }>;
@@ -68,12 +71,11 @@ export default async function VehicleDetailPage({ params }: Props) {
             </Link>
           </div>
           <div className="h-56 p-3">
-            <MapPlaceholder label={`${vehicle.name} 통과 가능 도로 커버리지 · Kakao Map 로드 예정`}>
-              <div className="text-muted-foreground pointer-events-none absolute right-3 bottom-3 flex items-center gap-1 rounded bg-black/40 px-2 py-1 text-[10.5px]">
-                <MapPinned size={10} />
-                히트맵 예정
-              </div>
-            </MapPlaceholder>
+            <KakaoCanvas
+              center={DEFAULT_CENTER}
+              level={6}
+              overlayLabel={`${vehicle.name} · 히트맵 오버레이 예정`}
+            />
           </div>
         </section>
       </div>

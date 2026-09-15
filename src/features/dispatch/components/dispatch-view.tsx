@@ -1,12 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { MapMarker, Polyline } from "react-kakao-maps-sdk";
 
-import { MapPlaceholder } from "@/features/map/components/map-placeholder";
+import { KakaoCanvas } from "@/components/map/kakao-canvas";
 import type { Scenario } from "@/features/scenarios/types";
 import type { Vehicle } from "@/features/vehicles/types";
 
-import { MOCK_ROUTES } from "../mock/routes";
+import { FIRE_STATION, useBackendRoutes } from "../hooks/use-backend-routes";
 import type { RouteCandidate } from "../types";
 import { CandidateCard } from "./candidate-card";
 import { DecisionBanner } from "./decision-banner";
@@ -18,36 +19,52 @@ interface DispatchViewProps {
   vehicles: Vehicle[];
 }
 
+/** 성남 중원구 대략 중심. 시나리오가 선택되지 않았을 때 지도 초기 위치. */
+const DEFAULT_CENTER = { lat: 37.432, lon: 127.145 };
+
 /**
- * `/dispatch` 화면의 클라이언트 오케스트레이터 — 상태(선택된 시나리오·미리보기 후보·근거
- * 시트 열림)를 여기서만 관리한다.
+ * `/dispatch` 화면 클라이언트 오케스트레이터.
  *
- * ⚠️ 실 데이터 연결 시 `MOCK_ROUTES` 룩업이 `POST /route` 훅으로 대체된다. 화면 상태 흐름은
- *    그대로 유지 — 컴포넌트 트리는 안 건드림 (§CLAUDE.md Mock → Live 격리막).
+ * ⚠️ 실 BE 연결 시 `MOCK_ROUTES` 룩업이 `POST /api/route` 훅으로 대체된다. 화면 상태 흐름은
+ *    그대로 유지 (§CLAUDE.md Mock → Live 격리막).
+ * ⚠️ **BE `POST /api/route` 응답은 단일 경로 + waypoints**로 확인됨(§FE-BE 리포트 §🔴 §1).
+ *    지금 후보 카드·순위 스왑 UX는 **팀장 답변 대기** — 답 오면 화면 재구성.
  */
 export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  /** 후보 카드 미리보기 상태 — 어떤 카드가 지도에 겹쳐 그려지는지. `null`이면 결정만. */
   const [previewingRank, setPreviewingRank] = useState<number | null>(null);
-  /** 결정 배너에 올라가 있는 경로가 무엇인지 (승격 후 스왑에 쓴다). */
   const [decisionRank, setDecisionRank] = useState<number>(1);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+  // 차량 선택 — 시나리오의 vehicleHint 를 기본값으로 하고 사용자가 상단 셀렉트로 바꿀 수 있다.
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
 
   const scenario = scenarios.find((s) => s.id === selectedId) ?? null;
-  const routes = scenario ? (MOCK_ROUTES[scenario.id]?.routes ?? []) : [];
+  // 시나리오가 바뀌면 그 힌트 차량으로 선택 초기화. 사용자가 이후 직접 바꾸면 그 선택 유지.
+  const activeVehicleId = selectedVehicleId ?? scenario?.vehicleHint ?? vehicles[0]?.id ?? "";
+  const vehicle = useMemo(
+    () => vehicles.find((v) => v.id === activeVehicleId) ?? null,
+    [vehicles, activeVehicleId],
+  );
+
+  // BE 가 3층 의사결정(정적 no-go × CCTV verdict × 차량 폭)을 이미 매겨서 내려준다 (§backend PR #24).
+  // 프론트는 렌더만. 옛 프론트-계산 훅(use-real-routes / use-osrm-enrich) 은 backend PR #24 로 함께 걷혔다.
+  const routes = useBackendRoutes({
+    destination: scenario ? scenario.location : null,
+    vehicleId: activeVehicleId,
+  });
   const decision: RouteCandidate | null =
     routes.find((r) => r.rank === decisionRank) ?? routes[0] ?? null;
   const candidates = routes.filter((r) => r.rank !== decisionRank);
-  const vehicle = useMemo(
-    () => (scenario ? (vehicles.find((v) => v.id === scenario.vehicleHint) ?? null) : null),
-    [scenario, vehicles],
-  );
+  const previewing = previewingRank !== null ? routes.find((r) => r.rank === previewingRank) : null;
+
+  const center = scenario ? scenario.location : DEFAULT_CENTER;
 
   function handleSelect(id: string) {
     setSelectedId(id);
     setDecisionRank(1);
     setPreviewingRank(null);
     setEvidenceOpen(false);
+    setSelectedVehicleId(null); // 새 시나리오는 해당 힌트 차량으로 자동 리셋
   }
 
   function handlePreview(rank: number) {
@@ -69,6 +86,32 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
 
       {/* 우측 · 결정 배너 + 지도 + 후보 카드 */}
       <section className="flex min-w-0 flex-1 flex-col gap-3 p-4">
+        {/* 차량 선택 — 폭 기준으로 경로가 재계산된다. 시나리오 힌트 차량이 기본. */}
+        {scenario && (
+          <div className="border-border bg-surface flex items-center gap-3 rounded-md border px-3 py-2">
+            <span className="text-muted-foreground text-[11.5px]">차량</span>
+            <div className="flex gap-1.5">
+              {vehicles.map((v) => (
+                <button
+                  key={v.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedVehicleId(v.id);
+                    setDecisionRank(1);
+                    setPreviewingRank(null);
+                  }}
+                  className={
+                    v.id === activeVehicleId
+                      ? "border-primary bg-primary/10 rounded border px-2.5 py-1 text-[11.5px]"
+                      : "border-border text-muted-foreground hover:bg-surface-2 rounded border px-2.5 py-1 text-[11.5px]"
+                  }
+                >
+                  {v.name} · {v.width}m
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <DecisionBanner
           decision={decision}
           vehicleName={vehicle?.name}
@@ -76,13 +119,46 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
         />
 
         <div className="relative flex min-h-0 flex-1 flex-col">
-          <MapPlaceholder>
-            {decision && (
-              <div className="text-muted-foreground pointer-events-none absolute right-4 bottom-4 rounded bg-black/40 px-2 py-1 text-[10.5px]">
-                결정 경로 굵게(6px, primary) · 미리보기 반투명 4px
-              </div>
+          <KakaoCanvas center={center} level={scenario ? 5 : 6}>
+            {/* 소방서(출발점) — 시나리오가 선택된 순간부터 항상 표시해서 파란 경로의 시작점이
+                시각적으로 확인되게 한다. 실서비스에서는 화점에 가장 가까운 관할 소방서를 BE 가 선택. */}
+            {scenario && (
+              <MapMarker
+                position={{ lat: FIRE_STATION.lat, lng: FIRE_STATION.lon }}
+                title="성남소방서 (출발)"
+                image={{
+                  src: "data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='40' viewBox='0 0 32 40'%3E%3Cpath d='M16 0C7.2 0 0 7.2 0 16c0 12 16 24 16 24s16-12 16-24C32 7.2 24.8 0 16 0z' fill='%23dc2626'/%3E%3Ccircle cx='16' cy='16' r='6' fill='white'/%3E%3C/svg%3E",
+                  size: { width: 32, height: 40 },
+                  options: { offset: { x: 16, y: 40 } },
+                }}
+              />
             )}
-          </MapPlaceholder>
+            {scenario && (
+              <MapMarker
+                position={{ lat: scenario.location.lat, lng: scenario.location.lon }}
+                title={scenario.title}
+              />
+            )}
+            {decision && (
+              <Polyline
+                path={toKakaoPath(decision.coordinates)}
+                strokeWeight={6}
+                // 통과 가능한 결정 경로는 파랑, 진입불가 경로만 남았을 때 (모두 우회 불가) 는 빨강.
+                strokeColor={decision.passableForVehicle === false ? "#ef4444" : "#6B9BD1"}
+                strokeOpacity={0.95}
+                strokeStyle={decision.passableForVehicle === false ? "shortdash" : "solid"}
+              />
+            )}
+            {previewing && (
+              <Polyline
+                path={toKakaoPath(previewing.coordinates)}
+                strokeWeight={4}
+                strokeColor="#8FB4E3"
+                strokeOpacity={0.7}
+                strokeStyle="dash"
+              />
+            )}
+          </KakaoCanvas>
 
           {evidenceOpen && decision && (
             <EvidenceSheet candidate={decision} onClose={() => setEvidenceOpen(false)} />
@@ -105,4 +181,14 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
       </section>
     </div>
   );
+}
+
+/**
+ * MOCK_ROUTES는 `[lon, lat]` GeoJSON 관례로 저장 · Kakao는 `{lat, lng}` 객체를 원함. 변환.
+ *
+ * ⚠️ 이 변환을 한 곳에 몰아둬야 좌표 순서 사고를 막는다. 지도에 넣는 자리마다 순서를 새로
+ *    쓰기 시작하면 어느 시점에 실수 하나로 폴리라인이 태평양에 그려진다.
+ */
+function toKakaoPath(coords: Array<[number, number]>) {
+  return coords.map(([lon, lat]) => ({ lat, lng: lon }));
 }
