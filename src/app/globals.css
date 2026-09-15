@@ -59,6 +59,22 @@
   --radius-sm: 0.25rem;
   --radius-md: 0.375rem;
   --radius-lg: 0.5rem;
+
+  /*
+   * 모션 · design-lab guide "motion motivated" 원칙.
+   * fireload 는 상황실이라 최소치만 · 목적 있는 곳에만 (hover · 상태 진입 · AI 스트리밍).
+   * ⚠️ 지속시간은 §CLAUDE.md 디자인 토큰 100/150/250ms 규약.
+   */
+  --motion-fast: 100ms;
+  --motion-base: 150ms;
+  --motion-slow: 250ms;
+  --motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /*
+   * Elevation · design-lab guide 4.4 "카드 shadow 는 hierarchy 있을 때만".
+   * fireload 는 다크 상황실 → 그림자 대신 border · 얕은 lift 만 hover 에.
+   */
+  --shadow-hover: 0 2px 8px -2px rgba(0, 0, 0, 0.25);
 }
 
 /*
@@ -171,4 +187,53 @@ body {
 */
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 접근성 · prefers-reduced-motion 켠 사용자에겐 애니메이션 전부 무효화.
+ * ⚠️ design-lab ai-interaction-patterns · web-design-guidelines 요구.
+ * ⚠️ transition·animation 모두 짧게 강제해서 시각적 점프 없이 즉시 최종 상태로 간다.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * 결정 배너 · 근거 카드 등 "AI 판정 결과" 가 새로 들어오는 순간을 부드럽게 알린다.
+ * ⚠️ design-lab guide "motion motivated" · 이 fade-in 은 "새 정보가 도착했다" 신호.
+ * ⚠️ 지도 위 overlay 시트 (evidence-sheet) 에도 재사용 · 위에서 미끄러져 내려오는 느낌.
+ */
+@keyframes fireload-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fireload-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fireload-enter-fade {
+  animation: fireload-fade-in var(--motion-slow) var(--motion-ease);
+}
+
+.fireload-enter-slide {
+  animation: fireload-slide-down var(--motion-slow) var(--motion-ease);
 }
