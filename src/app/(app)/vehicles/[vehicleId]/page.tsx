@@ -2,6 +2,7 @@ import { ArrowLeft, Truck } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { ConnectionBanner } from "@/components/common/connection-banner";
 import { AppHeader } from "@/components/layout/app-header";
 import { KakaoCanvas } from "@/components/map/kakao-canvas";
 import { fetchVehicles } from "@/features/vehicles/api";
@@ -17,12 +18,12 @@ interface Props {
 /**
  * `/vehicles/[vehicleId]` — 차량 상세 · 제원 표 + 커버리지 미니 히트맵 placeholder.
  * ⚠️ Next 15+는 `params`가 Promise.
- * ⚠️ BE 실 fetch · 실패 시 mock 폴백 (§vehicles/api.ts).
+ * ⚠️ BE 실 fetch · 실패 시 mock 폴백 + 상단 배너.
  */
 export default async function VehicleDetailPage({ params }: Props) {
   const { vehicleId } = await params;
-  const vehicles = await fetchVehicles();
-  const vehicle = vehicles.find((v) => v.id === vehicleId);
+  const result = await fetchVehicles();
+  const vehicle = result.data.find((v) => v.id === vehicleId);
   if (!vehicle) notFound();
 
   return (
@@ -40,6 +41,7 @@ export default async function VehicleDetailPage({ params }: Props) {
           </Link>
         }
       />
+      {result.source === "fallback" && <ConnectionBanner domain="차량" reason={result.reason} />}
       <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-6 py-6">
         <div className="border-border bg-surface flex items-center justify-between rounded-md border px-4 py-3">
           <div>
