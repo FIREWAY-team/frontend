@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { fetchRoutes } from "@/features/dispatch/api";
+import { fetchRoutePlan, fetchRoutes } from "@/features/dispatch/api";
 
 /**
  * `/api/route` — 클라이언트가 브라우저에서 부르는 프록시. 이 안에서 서버 사이드로 BE 컨테이너
@@ -17,13 +17,18 @@ export const revalidate = 0;
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
-  const routes = await fetchRoutes({
-    vehicleId: String(body.vehicleId ?? body.vehicle_id ?? "pump-3.5"),
-    from: body.from,
-    to: body.to,
-    k: typeof body.k === "number" ? body.k : 3,
-  });
-  return NextResponse.json(routes, {
-    headers: { "Cache-Control": "private, no-store, no-cache, must-revalidate" },
-  });
+  const details = new URL(request.url).searchParams.get("details") === "1";
+  try {
+    const routes = await (details ? fetchRoutePlan : fetchRoutes)({
+      vehicleId: String(body.vehicleId ?? body.vehicle_id ?? "pump-3.5"),
+      from: body.from,
+      to: body.to,
+      k: typeof body.k === "number" ? body.k : 3,
+    });
+    return NextResponse.json(routes, {
+      headers: { "Cache-Control": "private, no-store, no-cache, must-revalidate" },
+    });
+  } catch {
+    return NextResponse.json({ error: "경로 계산에 실패했습니다." }, { status: 502 });
+  }
 }

@@ -60,8 +60,12 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
     vehicleId: activeVehicleId,
   });
   const decision: RouteCandidate | null =
-    routes.find((r) => r.rank === decisionRank) ?? routes[0] ?? null;
-  const candidates = routes.filter((r) => r.rank !== decisionRank);
+    routes.find(
+      (r) => r.rank === decisionRank && r.passableForVehicle === true && !r.hasUnresolvedStaticNoGo,
+    ) ??
+    routes.find((r) => r.passableForVehicle === true && !r.hasUnresolvedStaticNoGo) ??
+    null;
+  const candidates = routes.filter((r) => r.rank !== decision?.rank);
 
   const center = scenario ? scenario.location : DEFAULT_CENTER;
 
@@ -78,6 +82,12 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
   }
 
   function handlePromote(rank: number) {
+    if (
+      !routes.some(
+        (r) => r.rank === rank && r.passableForVehicle === true && !r.hasUnresolvedStaticNoGo,
+      )
+    )
+      return;
     setDecisionRank(rank);
     setPreviewingRank(null);
     setEvidenceOpen(false);
