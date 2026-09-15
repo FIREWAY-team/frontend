@@ -41,6 +41,18 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "10mb",
     },
   },
+  /*
+    ⚠️ **2026-09-15 · 라이브 시연으로 방향 전환.** 팀 결정 — 랜딩·로그인은 걷어내고 상황실
+       (`/dispatch`) 로 바로 들여보낸다. 심사 링크 제출 · 발표 데모 하나에 집중.
+    ⚠️ **파일 삭제 대신 리다이렉트**로 두면 외부 링크·북마크·검색엔진 기록이 살아 있어도
+       사용자를 상황실로 실어 나른다. `permanent: false` — 언제든 뒤집을 수 있게(팀 재결정 여지).
+  */
+  async redirects() {
+    return [
+      { source: "/", destination: "/dispatch", permanent: false },
+      { source: "/login", destination: "/dispatch", permanent: false },
+    ];
+  },
 };
 
 export default nextConfig;

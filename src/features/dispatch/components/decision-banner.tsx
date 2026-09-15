@@ -20,6 +20,11 @@ interface DecisionBannerProps {
  *    (§FRONTEND_SPEC v0.2 §5-2 시나리오 A).
  * ⚠️ 확정 버튼은 토스트만 (시연용 · MVP). BE에 실제로 POST 나가는 자리는 실 세션 붙는
  *    시점에 서버 액션 붙임.
+ * ⚠️ **AI 인터랙션 어휘 반영** (§design-lab ai-interaction-patterns) — 결정 배너는
+ *    "AI 판정 결과" 를 사실 단정 대신 tentative 톤으로 보여준다. `aria-live="polite"` 로
+ *    시나리오 전환 시 스크린 리더가 새 결정을 읽어준다.
+ * ⚠️ **fade-in 진입** (§design-lab guide 4.7 · motion motivated) — 시나리오가 바뀌면
+ *    새 결정이 들어왔다는 시각 신호를 fade 로만 준다. 큰 애니메이션 금지.
  */
 export function DecisionBanner({ decision, vehicleName, onOpenEvidence }: DecisionBannerProps) {
   if (!decision || decision.passableForVehicle !== true || decision.hasUnresolvedStaticNoGo) {
@@ -47,7 +52,9 @@ export function DecisionBanner({ decision, vehicleName, onOpenEvidence }: Decisi
   return (
     <section
       aria-label="결정 경로"
-      className="border-primary/30 bg-primary/6 relative flex items-center gap-4 rounded-md border px-4 py-3"
+      aria-live="polite"
+      key={decision.rank}
+      className="border-primary/30 bg-primary/6 fireload-enter-fade relative flex items-center gap-4 rounded-md border px-4 py-3"
     >
       <div className="bg-primary/15 text-primary flex h-9 w-9 shrink-0 items-center justify-center rounded-full">
         <CheckCircle2 size={16} strokeWidth={2} />
@@ -74,7 +81,7 @@ export function DecisionBanner({ decision, vehicleName, onOpenEvidence }: Decisi
         <button
           type="button"
           onClick={onOpenEvidence}
-          className="border-border text-muted-foreground hover:text-foreground hover:bg-muted flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11.5px] font-medium transition-colors"
+          className="border-border text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:ring-ring focus-visible:ring-offset-background flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11.5px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
         >
           <FileText size={12} strokeWidth={2} />
           근거 보기
@@ -82,7 +89,7 @@ export function DecisionBanner({ decision, vehicleName, onOpenEvidence }: Decisi
         <button
           type="button"
           onClick={handleConfirm}
-          className="bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11.5px] font-semibold transition-colors"
+          className="bg-primary text-primary-foreground hover:bg-primary/90 focus-visible:ring-ring focus-visible:ring-offset-background flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11.5px] font-semibold transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
         >
           <Send size={12} strokeWidth={2} />
           출동 확정

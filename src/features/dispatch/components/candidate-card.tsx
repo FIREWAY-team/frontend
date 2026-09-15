@@ -23,6 +23,9 @@ const RANK_DOT_COLORS = ["#6B9BD1", "#f59e0b", "#10b981"];
  * ⚠️ 클릭 · 지도에 미리보기 겹침 → `[이 경로로 변경]` 눌러야 상단 결정 자리와 스왑
  *    (§FRONTEND_SPEC v0.2 §5-2 시나리오 B).
  * ⚠️ 통과확률 숫자는 크게 · 나머지 메타(ETA · 거리)는 부속.
+ * ⚠️ **hover subtle elevation** (§design-lab guide 4.4 · motion motivated) —
+ *    "이 카드는 클릭 가능하다" 는 어포던스 · 얕은 shadow + border 톤.
+ * ⚠️ **focus-visible ring** — 키보드 내비게이션 (§CLAUDE.md a11y).
  */
 export function CandidateCard({ candidate, previewing, onPreview, onPromote }: CandidateCardProps) {
   const probPct = Math.round(candidate.passableProb * 100);
@@ -34,7 +37,7 @@ export function CandidateCard({ candidate, previewing, onPreview, onPromote }: C
   return (
     <div
       className={cn(
-        "border-border bg-surface flex min-w-0 flex-1 flex-col gap-2 rounded-md border p-3 transition-colors",
+        "border-border bg-surface hover:border-border/80 flex min-w-0 flex-1 flex-col gap-2 rounded-md border p-3 transition-all hover:shadow-[var(--shadow-hover)]",
         previewing && "border-primary/50 bg-surface-2",
         impassable && "opacity-70",
       )}
@@ -76,7 +79,7 @@ export function CandidateCard({ candidate, previewing, onPreview, onPromote }: C
           type="button"
           onClick={onPreview}
           className={cn(
-            "flex-1 rounded px-2 py-1.5 text-[11px] font-medium transition-colors",
+            "focus-visible:ring-ring focus-visible:ring-offset-background flex-1 rounded px-2 py-1.5 text-[11px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
             previewing
               ? "bg-muted text-foreground"
               : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -88,8 +91,9 @@ export function CandidateCard({ candidate, previewing, onPreview, onPromote }: C
           type="button"
           onClick={onPromote}
           disabled={!previewing || impassable}
+          aria-disabled={!previewing || impassable}
           className={cn(
-            "flex items-center gap-1 rounded px-2 py-1.5 text-[11px] font-medium transition-colors",
+            "focus-visible:ring-ring focus-visible:ring-offset-background flex items-center gap-1 rounded px-2 py-1.5 text-[11px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
             "bg-primary text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40",
           )}
         >

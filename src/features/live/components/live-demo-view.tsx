@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { MapMarker, Polyline } from "react-kakao-maps-sdk";
 
 import { KakaoCanvas } from "@/components/map/kakao-canvas";
+import type { Incident } from "@/features/incidents/types";
 
 import {
   FIRE_STATION,
@@ -15,6 +16,9 @@ import {
 } from "../moran-scenario";
 import { useLiveRoutes } from "../use-live-routes";
 
+/** Live 시연 화점 설명 · 신고 접수 payload 로 사용 · 심사 시연에서 "실 접수" 신호. */
+const LIVE_INCIDENT_SUMMARY = "라이브 시연 · 중원구 주소 지오코딩 화점 · 소방차 진입 필요";
+
 export function LiveDemoView() {
   const step = useSyncExternalStore(subscribeHash, readStep, () => 1 as StepId);
   const [vehicleId, setVehicleId] = useState<string>("pump-3.5");
@@ -25,9 +29,58 @@ export function LiveDemoView() {
   const routes = data?.routes ?? [];
   const best = routes.find((r) => r.passableForVehicle === true && !r.hasUnresolvedStaticNoGo);
   const vehicle = LIVE_VEHICLES.find((v) => v.id === vehicleId)!;
+
+  // 실제 접수된 신고 · null 이면 아직 접수 전이거나 BE 실패 (조용히 fallthrough).
+  const [incident, setIncident] = useState<Incident | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
   const go = useCallback((next: StepId) => {
     window.location.hash = `step=${next}`;
   }, []);
+
+  /**
+   * 1단계 → 2단계 진행 시 `POST /api/incidents` 실호출 → `incident_no` 저장.
+   *
+   * ⚠️ **BE 실패해도 시연 흐름은 이어진다** — null 로 두고 2단계 진입. 시연 신뢰성이 접수 성공보다
+   *    우선 (§CLAUDE.md 정직성 · 라이브 시연 규약). 실패는 console.warn 만.
+   * ⚠️ 화점 좌표는 지오코딩으로 확보한 `destination` · 없으면 안전상 접수 스킵.
+   */
+  const advanceFromStepOne = useCallback(async () => {
+    if (!destination || submitting) {
+      go(2);
+      return;
+    }
+    if (incident) {
+      // 이미 접수된 상태 · 재접수하지 않는다 (같은 시연 중 중복 방지).
+      go(2);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/incidents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          address: LIVE_ADDRESS,
+          lat: destination.lat,
+          lon: destination.lon,
+          summary: LIVE_INCIDENT_SUMMARY,
+        }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as Incident;
+        setIncident(data);
+      } else {
+        console.warn(`[live] 신고 접수 실패: HTTP ${res.status} · 시연 계속`);
+      }
+    } catch (err) {
+      const name = err instanceof Error ? err.name : "unknown";
+      console.warn(`[live] 신고 접수 오류: ${name} · 시연 계속`);
+    } finally {
+      setSubmitting(false);
+      go(2);
+    }
+  }, [destination, incident, submitting, go]);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -110,6 +163,19 @@ export function LiveDemoView() {
               />
             ))}
         </KakaoCanvas>
+
+        {/* 접수 번호 배지 · 2단계 이후 상시 노출 · "실 접수됐다" 신호. */}
+        {step >= 2 && incident && (
+          <div className="absolute top-3 right-3 z-10 flex items-center gap-2 rounded-full border border-neutral-300 bg-white/95 px-3 py-1.5 text-[11px] shadow-md backdrop-blur-sm">
+            <span className="rounded-full bg-emerald-500 px-1.5 py-0.5 text-[9.5px] font-bold text-white">
+              접수 완료
+            </span>
+            <span className="font-mono text-[11px] font-semibold text-neutral-900">
+              {incident.incidentNo}
+            </span>
+          </div>
+        )}
+
         <section
           aria-label="라이브 시연 결과"
           className="border-border bg-surface absolute right-4 bottom-4 z-10 max-h-[80%] w-96 overflow-y-auto rounded-lg border p-4 shadow-xl"
@@ -129,10 +195,18 @@ export function LiveDemoView() {
             </p>
           )}
           {step === 2 && (
-            <p className="my-4 text-sm">
-              선택한 차량의 모의 AI 판독 결과를 조회하고, 통행 가능한 골목을 반영해 도로 경로를
-              탐색합니다.
-            </p>
+            <>
+              <p className="my-4 text-sm">
+                선택한 차량의 모의 AI 판독 결과를 조회하고, 통행 가능한 골목을 반영해 도로 경로를
+                탐색합니다.
+              </p>
+              {incident && (
+                <p className="text-muted-foreground my-2 text-xs">
+                  접수 번호 <span className="font-mono">{incident.incidentNo}</span> · 상태{" "}
+                  {incident.status}
+                </p>
+              )}
+            </>
           )}
           {step >= 3 && (
             <>
@@ -215,11 +289,25 @@ export function LiveDemoView() {
               </button>
             )}
             <button
-              disabled={!destination || (step === 3 && (!data || !best))}
-              onClick={() => go(step === 5 ? 1 : ((step + 1) as StepId))}
+              disabled={!destination || submitting || (step === 3 && (!data || !best))}
+              onClick={() => {
+                if (step === 1) {
+                  void advanceFromStepOne();
+                } else {
+                  go(step === 5 ? 1 : ((step + 1) as StepId));
+                }
+              }}
               className="bg-primary text-primary-foreground ml-auto rounded px-3 py-2 text-sm disabled:opacity-40"
             >
-              {step === 5 ? "처음부터" : step === 2 ? "CCTV 판정·경로 탐색" : "다음"}
+              {step === 1
+                ? submitting
+                  ? "접수 요청 중…"
+                  : "119 신고 접수 → CCTV 판정"
+                : step === 5
+                  ? "처음부터"
+                  : step === 2
+                    ? "CCTV 판정·경로 탐색"
+                    : "다음"}
             </button>
           </div>
         </section>

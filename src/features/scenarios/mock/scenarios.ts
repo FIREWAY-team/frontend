@@ -12,7 +12,7 @@ import type { Scenario } from "../types";
 export const MOCK_SCENARIOS: Scenario[] = [
   {
     id: "moran-oil-alley",
-    title: "모란기름골목 화재 (시연 A)",
+    title: "모란기름골목 화재",
     address: "성남시 중원구 둔촌대로69번길 8 일대 (모란기름골목)",
     location: { lat: 37.4292, lon: 127.132 },
     vehicleHint: "pump-3.5",

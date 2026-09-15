@@ -15,7 +15,7 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { href: "/live", label: "라이브 시연", icon: Play },
+  { href: "/live", label: "라이브 브리핑", icon: Play },
   { href: "/dispatch", label: "상황실", icon: LayoutDashboard },
   { href: "/map", label: "관할 지도", icon: MapPinned },
   { href: "/vehicles", label: "차량 관리", icon: Truck },
@@ -65,11 +65,11 @@ export function AppSidebar() {
       <div className="mt-auto p-3">
         <div className="bg-surface-2 flex items-center gap-2.5 rounded-md px-2.5 py-2">
           <div className="bg-primary/20 text-primary flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold">
-            데모
+            SN
           </div>
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-foreground truncate text-[12px] font-medium">데모 담당자</span>
-            <span className="text-muted-foreground truncate text-[10.5px]">상황실</span>
+            <span className="text-foreground truncate text-[12px] font-medium">성남소방서</span>
+            <span className="text-muted-foreground truncate text-[10.5px]">중원 상황실</span>
           </div>
         </div>
       </div>
