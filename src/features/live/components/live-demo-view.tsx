@@ -246,9 +246,9 @@ function StepOneCard({ onDispatch }: { onDispatch: () => void }) {
       </div>
       <div className="p-4">
         <div className="text-[12px] font-semibold text-red-900">
-          경기 성남시 중원구 둔촌대로69번길 8 일대
+          경기 성남시 중원구 제일로35번길 51
         </div>
-        <div className="text-[11.5px] text-neutral-700">모란기름골목 화재 발생 및 연기 확산</div>
+        <div className="text-[11.5px] text-neutral-700">화재 발생 및 연기 확산</div>
         <div className="mt-3 rounded bg-neutral-50 p-2 text-[11px] text-neutral-600">
           발화 추정: 상업용 건물 1층 · 인근 노점 밀집
         </div>
