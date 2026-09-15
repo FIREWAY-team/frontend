@@ -42,6 +42,7 @@ export function KakaoCanvas({
   // 실제로 `useKakaoLoader`가 빈 appkey를 받으면 SDK를 로드하지 않고 loading 상태를 유지한다.
   const [loading, error] = useKakaoLoader({
     appkey: env.kakaoMapAppKey,
+    libraries: ["services"],
     // 라이브러리 확장이 필요하면 여기 추가(`services`는 지오코딩·주소 검색 · `clusterer`는 마커 클러스터).
     // 지금은 필요 시점에 붙임 — 로드 시간 늘어난다.
   });

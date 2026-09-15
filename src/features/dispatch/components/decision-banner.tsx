@@ -22,11 +22,11 @@ interface DecisionBannerProps {
  *    시점에 서버 액션 붙임.
  */
 export function DecisionBanner({ decision, vehicleName, onOpenEvidence }: DecisionBannerProps) {
-  if (!decision) {
+  if (!decision || decision.passableForVehicle !== true || decision.hasUnresolvedStaticNoGo) {
     return (
       <div className="border-border bg-surface flex items-center justify-center rounded-md border px-4 py-6">
         <span className="text-muted-foreground text-[12px]">
-          좌측에서 시나리오를 선택하면 결정 경로가 여기 표시됩니다.
+          확정 가능한 경로가 없습니다. 시나리오·차량을 선택하고 CCTV 판정을 확인해 주세요.
         </span>
       </div>
     );

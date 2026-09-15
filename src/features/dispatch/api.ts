@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { LiveRouteResult } from "@/features/live/use-live-routes";
+
 import type { RouteCandidate } from "./types";
 
 /**
@@ -34,6 +36,14 @@ interface BeRouteCandidate {
 
 interface BeRouteResponse {
   routes?: BeRouteCandidate[];
+  cctv_assessments?: Array<{
+    edge_id: string;
+    coordinates: [number, number][];
+    verdict: string;
+    cctv_id: string | null;
+    confidence: number;
+  }>;
+  warnings?: string[];
   calc_time_ms?: number;
   alternatives_status?: string;
   no_go_considered?: number;
@@ -57,8 +67,16 @@ export interface RoutePlanInput {
  *    렌더만 (§backend PR #24).
  */
 export async function fetchRoutes(input: RoutePlanInput): Promise<RouteCandidate[]> {
+  try {
+    return (await fetchRoutePlan(input)).routes;
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchRoutePlan(input: RoutePlanInput): Promise<LiveRouteResult> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
+  const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
     const res = await fetch(`${BACKEND_API_URL}/api/route`, {
       method: "POST",
@@ -73,16 +91,25 @@ export async function fetchRoutes(input: RoutePlanInput): Promise<RouteCandidate
       }),
     });
     if (!res.ok) {
-      console.warn(`[route] fetch failed: HTTP ${res.status}`);
-      return [];
+      throw new Error(`Route service returned HTTP ${res.status}`);
     }
     const raw = (await res.json()) as BeRouteResponse;
     const routes = Array.isArray(raw.routes) ? raw.routes : [];
-    return routes.map(toRouteCandidate);
+    return {
+      routes: routes.map(toRouteCandidate),
+      assessments: (raw.cctv_assessments ?? []).map((a) => ({
+        edgeId: a.edge_id,
+        coordinates: a.coordinates,
+        verdict: a.verdict,
+        cctvId: a.cctv_id,
+        confidence: a.confidence,
+      })),
+      warnings: raw.warnings ?? [],
+    };
   } catch (err) {
     const name = err instanceof Error ? err.name : "unknown";
     console.warn(`[route] fetch error: ${name}`);
-    return [];
+    throw err;
   } finally {
     clearTimeout(timeout);
   }
@@ -102,9 +129,9 @@ function toRouteCandidate(be: BeRouteCandidate): RouteCandidate {
     etaSec: be.eta_sec,
     distanceM: be.distance_m,
     passableProb: be.passable_prob,
-    passableForVehicle: be.passable_for_vehicle ?? true,
+    passableForVehicle: be.passable_for_vehicle === true,
     unlockedByCctv: be.unlocked_by_cctv ?? [],
-    hasUnresolvedStaticNoGo: be.has_unresolved_static_no_go ?? false,
+    hasUnresolvedStaticNoGo: be.has_unresolved_static_no_go ?? true,
     explanation: be.explanation ?? "",
     excludedReasons: (be.excluded_reasons ?? []).map((r) => ({
       edgeId: r.edge_id ?? r.polygon_id ?? "",
