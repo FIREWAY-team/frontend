@@ -68,12 +68,12 @@ app/
 
 ### 상태관리 경계
 
-| 상태 종류 | 저장소 | 예 |
-|---|---|---|
-| 서버 데이터 (재조회 가능) | **React Query** | `/scenarios`, `/route`, `/vehicles`, `/no_go`, `/coverage`, `/cctv/:id` |
-| UI 로컬 (컴포넌트 스코프) | `useState` | 팝업 열림 · 폼 입력 |
-| UI 로컬 (화면 간 공유) | **Zustand** | 선택된 차량 id · 오버레이 토글 |
-| 세션 · 계정 | httpOnly 쿠키 + `GET /auth/me` (React Query) | 로그인 사용자 |
+| 상태 종류                 | 저장소                                       | 예                                                                      |
+| ------------------------- | -------------------------------------------- | ----------------------------------------------------------------------- |
+| 서버 데이터 (재조회 가능) | **React Query**                              | `/scenarios`, `/route`, `/vehicles`, `/no_go`, `/coverage`, `/cctv/:id` |
+| UI 로컬 (컴포넌트 스코프) | `useState`                                   | 팝업 열림 · 폼 입력                                                     |
+| UI 로컬 (화면 간 공유)    | **Zustand**                                  | 선택된 차량 id · 오버레이 토글                                          |
+| 세션 · 계정               | httpOnly 쿠키 + `GET /auth/me` (React Query) | 로그인 사용자                                                           |
 
 - **Zustand는 오직 UI 상태만.** 서버 데이터는 절대 담지 않는다 — 캐시 무효화·재조회를 React Query에 위임한다.
 - ⚠️ 두 저장소에 같은 값을 두면 어느 쪽이 정본인지 다음 사람이 헷갈린다.
@@ -134,29 +134,36 @@ app/
 
 ## 디자인 토큰 (하드코딩 금지 · **CSS 변수로 정의**)
 
-> 🎨 **화면 만들 때는 [`docs/DESIGN.md`](docs/DESIGN.md)(작성 예정)를 먼저 훑는다.** 여기는 값이고, 거기는 **언제 어떤 값을 고르는지와 틀렸을 때 나는 일**이다.
+> 🎨 **정본은 `src/app/globals.css` 의 `:root` · `.dark` 블록**. 여기는 규약 · 값 자체는 코드가 진실이다.
+> 🎨 **강사님 design-lab 파이프라인 (`design-taste-frontend` · `ai-interaction-patterns` · `web-design-guidelines`)** 은 landing/portfolio 특화라 fireload dashboard 는 out-of-scope (§design-taste-frontend §13). 다만 색상 잠금 · 상태 완결 · a11y · AI 인터랙션 어휘 는 dashboard 에도 유효 · 이 문서에 반영.
 >
 > **다크가 기본이다** (야간 상황실). 라이트는 옵션 토글. 토큰 구조는 Day-1.
 
-- **다크 (기본):** 배경·셸 `#1A1715` · 카드 `#242120` · 보조 `#2E2A28` · 보더 `#33302D` · 텍스트 `#FAFAF9` · 보조텍스트 `#A8A29E`
-  - ⚠️ **순검정 금지** (최저값 `#1A1715`).
-  - **사이드바·상단바·본문은 `--background` 한 색**, 카드는 `--card`.
-- **라이트 (옵션):** 배경·셸 `#FFFFFF` · 카드 `#FFFFFF`+보더 `#E7E5E4` · 섹션띠 `#FAFAF9`
-  - 라이트에서 `--background`·`--card`는 **둘 다 흰색**. 카드는 색이 아니라 **얕은 그림자**로 띄운다.
-  - ⚠️ **바탕을 회색·크림으로 밀지 않는다.**
+- **fireload 톤 · blue-navy 상황실** (⚠️ 2026-09-15 정정 — 이전엔 z-groupware warm `#1A1715` 을 이어받으려 했으나 성남시 · 공공기관 상황실 톤 · 야간 지도 시인성 이유로 차가운 파란 계열로 갈아엎었다. 왜 뒤집혔는지 남긴다).
+- **다크 (기본):** 배경 `#0f1520` · 표면 `#182233` · 표면-2 `#1e2a3d` · 보더 `#2a3648` · 텍스트 `#e6ebf3` · 보조텍스트 `#8b96ab` · 액센트 `#6b9bd1`
+  - ⚠️ **순검정 금지** (최저값 `#0f1520` blue-black).
+  - **사이드바·상단바·본문은 `--background` 한 색**, 카드는 `--surface` · 오버레이는 `--surface-2`.
+- **라이트 (옵션):** 배경 `#f6f7fa` · 표면 `#ffffff` · 텍스트 `#1a2233` · 액센트 `#4a6fa0`
+  - 라이트에서 카드는 얕은 border 로 띄운다 (color 반전은 금지).
 - 다크는 **전 페이지 적용**이다. 컴포넌트에서 `dark:` 클래스를 직접 쓰지 말고 토큰만 쓴다.
-- **시맨틱:** 액센트 `#3B82F6` · 성공 `#22C55E` · 경고 `#F59E0B` · **에러(진입 불가) `#EF4444`**.
-- **색으로 알리는 건 에러(빨강) 하나뿐** — 통과확률 히트맵은 그라디언트를 쓰되, 정확한 판단은 카드의 숫자·문구가 담당한다. 색약 사용자를 고려해 히트맵 옆에는 반드시 숫자·아이콘·문구가 붙는다.
-- **포커스 링은 먹색**(`--ring`).
-- **레이아웃:** 사이드바 220px + PageLayout 3종 — `list`(1440) · `detail`(1440 2컬럼) · `centered`(560)
+- **시맨틱:** 성공 `--success` · 경고 `--warning` · **위험 `--danger` (진입 불가 · 빨강)** · 히트맵 3단계 `--heat-safe/warn/danger`.
+- **색으로 알리는 건 위험(빨강) 하나뿐** — 통과확률 히트맵은 그라디언트를 쓰되, 정확한 판단은 카드의 숫자·문구가 담당한다. 색약 사용자를 고려해 히트맵 옆에는 반드시 숫자·아이콘·문구가 붙는다.
+- **컬러 잠금** (§design-lab guide 4.2) · 한 페이지 안에서 액센트는 primary 하나 · 후보 경로 색은 rank 별 3색 (`#6B9BD1 · #f59e0b · #10b981`) 이 유일한 예외 · 지도 렌더 + `CandidateCard` 배지 dot 매칭 자리에만 쓴다.
+- **포커스 링은 `--ring`** (`focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`). 표준 유틸 문자열 · 컴포넌트별로 손대지 않는다.
+- **모션 · motion motivated** (§design-lab guide 5) · 기본 값은 `--motion-fast/base/slow` (100/150/250ms) · ease `--motion-ease`. `prefers-reduced-motion` 은 `globals.css` 가 전역으로 무효화. 목적 없는 애니메이션 금지.
+- **Shadow · Elevation** · `--shadow-hover` 만 정의. 카드 hover 어포던스에만 사용 · 정적 카드에 shadow 얹지 않는다 (§design-lab guide 4.4).
+- **레이아웃:** 사이드바 220px + PageLayout 3종 — `list`(1440) · `detail`(1440 2컬럼) · `centered`(560) · **랜딩 은 예외로 `max-w-[1144px]`** (z-groupware 승계 · 한 곳만 남긴 예외).
   - ⚠️ `w-[1440px]` 대신 `mx-auto max-w-[1440px] px-8`, absolute 대신 flex/grid, 표는 `overflow-x-auto`로 감싼다.
   - ⚠️ **새 숫자를 만들지 않는다.** 1080·1120·1144처럼 중간값이 늘면 화면마다 여백이 달라 눈에 띄게 흔들린다.
   - **모바일 대응 안 함**(v3까지). 대상 화면 선별은 실증 뒤.
 - 폼 2열(`FormRow`) · 제출 버튼 하단우측 · 로딩=스켈레톤 · 모션 100/150/250ms · 숫자 `tabular-nums`
+- **타이포 · Geist** (§`layout.tsx` `next/font/google`) · 본문 13px 밀도 유지 · **랜딩 헤드라인만 44/60px + tracking-[-1.3px~-1.9px] + break-keep** (§design-lab guide 4.1 · z-groupware 승계).
 - **카피:** **~합니다체** · 날짜 `9월 5일(금)` · 시각 `오전 3시 22분`
   - 상황실은 **초 단위 판단**이 걸린 화면이다. 친근한 말투는 오히려 가볍게 읽힌다. `들어올 수 없어요` → `접근할 수 없습니다`.
   - 명령은 **`~해 주세요`** 를 쓴다. `~하십시오`는 딱딱해서 안 쓴다.
+  - **AI 판정 결과는 tentative 톤** (§design-lab ai-interaction-patterns) · "완료했습니다" 대신 "정리했어요 · 확인해 주세요".
 - 아이콘: `lucide-react` 표준 / 커스텀SVG=SVGR(`currentColor`). ❌이모지·`<img src=.svg>`
+  - ⚠️ design-lab guide 는 `phosphor-icons` 를 1순위로 두지만 · fireload 는 lucide 먼저 도입했고 교체 비용 크다 · lucide 유지 (guide 도 override 허용).
 
 ---
 
