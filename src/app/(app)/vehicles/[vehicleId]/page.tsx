@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 
 import { AppHeader } from "@/components/layout/app-header";
 import { KakaoCanvas } from "@/components/map/kakao-canvas";
-import { MOCK_VEHICLES } from "@/features/vehicles/mock/vehicles";
+import { fetchVehicles } from "@/features/vehicles/api";
 import { VEHICLE_SIZE_LABEL } from "@/features/vehicles/types";
 
 /** 성남 중원구 대략 중심 — 커버리지 썸네일 기본 자리. */
@@ -17,10 +17,12 @@ interface Props {
 /**
  * `/vehicles/[vehicleId]` — 차량 상세 · 제원 표 + 커버리지 미니 히트맵 placeholder.
  * ⚠️ Next 15+는 `params`가 Promise.
+ * ⚠️ BE 실 fetch · 실패 시 mock 폴백 (§vehicles/api.ts).
  */
 export default async function VehicleDetailPage({ params }: Props) {
   const { vehicleId } = await params;
-  const vehicle = MOCK_VEHICLES.find((v) => v.id === vehicleId);
+  const vehicles = await fetchVehicles();
+  const vehicle = vehicles.find((v) => v.id === vehicleId);
   if (!vehicle) notFound();
 
   return (
