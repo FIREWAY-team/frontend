@@ -29,7 +29,8 @@ export function CandidateCard({ candidate, previewing, onPreview, onPromote }: C
   const etaMin = Math.floor(candidate.etaSec / 60);
   const etaSec = candidate.etaSec % 60;
 
-  const impassable = candidate.passableForVehicle === false;
+  const impassable =
+    candidate.passableForVehicle !== true || candidate.hasUnresolvedStaticNoGo === true;
   return (
     <div
       className={cn(
@@ -86,7 +87,7 @@ export function CandidateCard({ candidate, previewing, onPreview, onPromote }: C
         <button
           type="button"
           onClick={onPromote}
-          disabled={!previewing}
+          disabled={!previewing || impassable}
           className={cn(
             "flex items-center gap-1 rounded px-2 py-1.5 text-[11px] font-medium transition-colors",
             "bg-primary text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40",
