@@ -14,6 +14,9 @@ interface CandidateCardProps {
   onPromote: () => void;
 }
 
+/** 지도 폴리라인 색과 맞추면 카드-지도 시각 매핑이 성립. dispatch-view ROUTE_COLORS 와 동기. */
+const RANK_DOT_COLORS = ["#6B9BD1", "#f59e0b", "#10b981"];
+
 /**
  * 후보 경로 카드 (2·3순위) — 지도 아래 가로로 배치.
  *
@@ -37,6 +40,11 @@ export function CandidateCard({ candidate, previewing, onPreview, onPromote }: C
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-1.5">
+          <span
+            aria-hidden
+            className="inline-block h-2 w-2 rounded-full"
+            style={{ backgroundColor: RANK_DOT_COLORS[candidate.rank - 1] ?? "#94a3b8" }}
+          />
           <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[10.5px] font-medium">
             {candidate.rank}순위
           </span>

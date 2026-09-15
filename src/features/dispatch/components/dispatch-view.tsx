@@ -12,6 +12,7 @@ import type { RouteCandidate } from "../types";
 import { CandidateCard } from "./candidate-card";
 import { DecisionBanner } from "./decision-banner";
 import { EvidenceSheet } from "./evidence-sheet";
+import { IntakeOverlay } from "./intake-overlay";
 import { ScenarioList } from "./scenario-list";
 
 interface DispatchViewProps {
@@ -21,6 +22,12 @@ interface DispatchViewProps {
 
 /** 성남 중원구 대략 중심. 시나리오가 선택되지 않았을 때 지도 초기 위치. */
 const DEFAULT_CENTER = { lat: 37.432, lon: 127.145 };
+
+/**
+ * 경로 순위별 색. rank 1 = 결정(파랑), 2 = 주황, 3 = 초록, 그 이하 = 회색 폴백.
+ * ⚠️ CandidateCard 배지 색과 맞추면 사용자가 카드-지도 대응을 눈으로 잇는다.
+ */
+const ROUTE_COLORS = ["#6B9BD1", "#f59e0b", "#10b981"];
 
 /**
  * `/dispatch` 화면 클라이언트 오케스트레이터.
@@ -55,7 +62,6 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
   const decision: RouteCandidate | null =
     routes.find((r) => r.rank === decisionRank) ?? routes[0] ?? null;
   const candidates = routes.filter((r) => r.rank !== decisionRank);
-  const previewing = previewingRank !== null ? routes.find((r) => r.rank === previewingRank) : null;
 
   const center = scenario ? scenario.location : DEFAULT_CENTER;
 
@@ -139,26 +145,29 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
                 title={scenario.title}
               />
             )}
-            {decision && (
-              <Polyline
-                path={toKakaoPath(decision.coordinates)}
-                strokeWeight={6}
-                // 통과 가능한 결정 경로는 파랑, 진입불가 경로만 남았을 때 (모두 우회 불가) 는 빨강.
-                strokeColor={decision.passableForVehicle === false ? "#ef4444" : "#6B9BD1"}
-                strokeOpacity={0.95}
-                strokeStyle={decision.passableForVehicle === false ? "shortdash" : "solid"}
-              />
-            )}
-            {previewing && (
-              <Polyline
-                path={toKakaoPath(previewing.coordinates)}
-                strokeWeight={4}
-                strokeColor="#8FB4E3"
-                strokeOpacity={0.7}
-                strokeStyle="dash"
-              />
-            )}
+            {/* 후보 경로 전부 rank 별 색으로 렌더 — 사용자가 카드를 안 눌러도 대안이 지도에
+                한번에 보이게. 결정 경로(rank 1) 를 마지막에 그려 위로 올라오게 한다. */}
+            {routes
+              .slice()
+              .sort((a, b) => b.rank - a.rank)
+              .map((r) => {
+                const isDecision = r.rank === decisionRank;
+                const isPreview = previewingRank === r.rank;
+                const impassable = r.passableForVehicle === false;
+                return (
+                  <Polyline
+                    key={r.rank}
+                    path={toKakaoPath(r.coordinates)}
+                    strokeWeight={isDecision ? 6 : isPreview ? 5 : 4}
+                    strokeColor={impassable ? "#ef4444" : (ROUTE_COLORS[r.rank - 1] ?? "#94a3b8")}
+                    strokeOpacity={isDecision ? 0.95 : isPreview ? 0.85 : 0.55}
+                    strokeStyle={impassable ? "shortdash" : isDecision ? "solid" : "dash"}
+                  />
+                );
+              })}
           </KakaoCanvas>
+
+          {scenario && <IntakeOverlay scenario={scenario} />}
 
           {evidenceOpen && decision && (
             <EvidenceSheet candidate={decision} onClose={() => setEvidenceOpen(false)} />

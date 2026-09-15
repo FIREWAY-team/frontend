@@ -19,4 +19,29 @@ export interface Scenario {
   vehicleHint: string;
   /** 화면 좌측 카드에 붙는 도로명 요약. */
   address: string;
+  /**
+   * 접수 정보 — 상황실이 출동 확정 전 훑는 신고 컨텍스트.
+   * ⚠️ 전 필드 optional. BE `/scenarios` 미제공이면 UI 가 "미확인" 폴백.
+   * ⚠️ **라이브 표기 금지** — `reportedAt` 있어도 "지금 접수" 문구 금지 (§CLAUDE.md).
+   */
+  intake?: ScenarioIntake;
+}
+
+export interface ScenarioIntake {
+  /** 신고자 표시명 — 익명 신고면 "익명". */
+  reporterName?: string;
+  /** 마스킹된 연락처 (예: "010-****-5678"). BE 가 마스킹해서 내려줌. */
+  reporterPhone?: string;
+  /** 접수 시각 (ISO8601). UI 는 "HH:mm 접수" 고정, 상대시간 금지. */
+  reportedAt?: string;
+  /** 소방청 3단계. 배지 색: small=blue · medium=amber · large=red. */
+  severity?: "small" | "medium" | "large";
+  /** 추정 화재 범위 (m²). */
+  estimatedAreaM2?: number;
+  /** 건물 구조 자유 문자열 (예: "5층 상가", "단독주택"). */
+  buildingType?: string;
+  /** 인명 피해 신고 여부. */
+  casualtiesReported?: boolean;
+  /** 특이사항 1줄 (예: "가스 누출 냄새"). */
+  notes?: string;
 }

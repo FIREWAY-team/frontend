@@ -13,6 +13,16 @@ export const MOCK_SCENARIOS: Scenario[] = [
     address: "성남시 중원구 은행로 12-3",
     location: { lat: 37.43, lon: 127.14 },
     vehicleHint: "pump-8",
+    intake: {
+      reporterName: "김OO",
+      reporterPhone: "010-****-3421",
+      reportedAt: "2026-09-15T14:22:00+09:00",
+      severity: "medium",
+      estimatedAreaM2: 60,
+      buildingType: "2층 단독주택",
+      casualtiesReported: false,
+      notes: "1층 주방에서 연기, 거주자 대피 완료",
+    },
   },
   {
     id: "sd1-102",
@@ -20,6 +30,15 @@ export const MOCK_SCENARIOS: Scenario[] = [
     address: "성남시 중원구 상대원로 45-1",
     location: { lat: 37.4291, lon: 127.1445 },
     vehicleHint: "pump-3.5",
+    intake: {
+      reporterName: "익명",
+      reportedAt: "2026-09-15T14:18:00+09:00",
+      severity: "small",
+      estimatedAreaM2: 25,
+      buildingType: "5층 상가 (1층 음식점)",
+      casualtiesReported: false,
+      notes: "튀김기 화재, 초기 진화 시도 중",
+    },
   },
   {
     id: "hd-45-2",
@@ -27,5 +46,15 @@ export const MOCK_SCENARIOS: Scenario[] = [
     address: "성남시 중원구 하대원로 88",
     location: { lat: 37.4342, lon: 127.1502 },
     vehicleHint: "pump-15",
+    intake: {
+      reporterName: "박OO (공장장)",
+      reporterPhone: "010-****-7788",
+      reportedAt: "2026-09-15T14:05:00+09:00",
+      severity: "large",
+      estimatedAreaM2: 320,
+      buildingType: "1층 철골 공장 (도장 라인)",
+      casualtiesReported: true,
+      notes: "유증기 · 잔여 인원 2명 확인 중",
+    },
   },
 ];
