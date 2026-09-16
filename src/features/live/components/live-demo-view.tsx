@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { MapMarker, Polyline } from "react-kakao-maps-sdk";
 
 import { KakaoCanvas } from "@/components/map/kakao-canvas";
+import { AttachPanel } from "@/features/incidents/components/attach-panel";
 import type { Incident } from "@/features/incidents/types";
 
 import {
@@ -279,6 +280,11 @@ export function LiveDemoView() {
               </button>
             </>
           )}
+          {/*
+            신고 첨부 · 접수 완료 이후 (2단계 이상) 상시 노출. 심사 시연에서 "실 접수 · 실 첨부" 흐름을
+            눈으로 확인할 수 있어야 한다. 신고 없으면 안내 카드만 (§AttachPanel).
+          */}
+          {step >= 2 && <AttachPanel incidentNo={incident ? incident.incidentNo : null} />}
           <div className="mt-3 flex justify-between gap-2">
             {step > 1 && (
               <button
