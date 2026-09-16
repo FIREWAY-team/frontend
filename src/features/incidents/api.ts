@@ -1,13 +1,24 @@
 import "server-only";
 
-import type { BeIncident, BeStoredRoute } from "./mapper";
-import { toBeIncidentRequest, toBeStoredRoutesRequest, toIncident, toStoredRoute } from "./mapper";
+import type { BeAttachment, BeIncident, BeStoredRoute, BeUploadUrl } from "./mapper";
+import {
+  toAttachment,
+  toBeIncidentRequest,
+  toBeStoredRoutesRequest,
+  toBeUploadUrlRequest,
+  toIncident,
+  toStoredRoute,
+  toUploadUrl,
+} from "./mapper";
 import type {
+  Attachment,
   CreateIncidentRequest,
   CreateStoredRoutesRequest,
+  CreateUploadUrlRequest,
   Incident,
   IncidentStatus,
   StoredRoute,
+  UploadUrl,
 } from "./types";
 
 const BACKEND_API_URL = process.env.BACKEND_API_URL ?? "http://backend:8080";
@@ -98,4 +109,55 @@ export async function fetchStoredRoutes(incidentNo: string): Promise<StoredRoute
   const raw = await be<BeStoredRoute[]>(`/api/incidents/${encodeURIComponent(incidentNo)}/routes`);
   if (!Array.isArray(raw)) return [];
   return raw.map(toStoredRoute);
+}
+
+/* ─────────────────────────────────────────────────────────────
+ * 파일 업로드 · 신고 첨부 (BE #36 · #37 · 2026-09-16)
+ * ⚠️ **1단계 · 3단계는 BFF 경유** · 2단계 (S3 PUT) 는 브라우저 → S3 직결.
+ *    따라서 이 파일은 1·3단계만 담당 · S3 PUT 은 client 코드에서.
+ * ─────────────────────────────────────────────────────────────
+ */
+
+/**
+ * `POST /api/files/upload-url` — presigned PUT URL 발급.
+ * ⚠️ 5분 만료 · 발급 후 즉시 브라우저에서 S3 로 PUT.
+ * ⚠️ Nginx IP 당 분당 5회 rate limit — 시연에서 반복 클릭 유의.
+ */
+export async function createUploadUrl(req: CreateUploadUrlRequest): Promise<UploadUrl | null> {
+  const raw = await be<BeUploadUrl>(`/api/files/upload-url`, {
+    method: "POST",
+    body: toBeUploadUrlRequest(req),
+  });
+  return raw ? toUploadUrl(raw) : null;
+}
+
+/**
+ * `POST /api/incidents/{no}/attachments` · S3 업로드 후 key 를 신고에 붙임.
+ * ⚠️ **PUT 완료 후 부른다** — PUT 안 끝나고 부르면 BE 가 422 (S3 HEAD 실패).
+ * ⚠️ 같은 key 재첨부 · 409. 없는 신고 · 404. 상한 초과 · 422 + S3 파일 삭제.
+ */
+export async function attachToIncident(
+  incidentNo: string,
+  key: string,
+): Promise<Attachment | null> {
+  const raw = await be<BeAttachment>(
+    `/api/incidents/${encodeURIComponent(incidentNo)}/attachments`,
+    {
+      method: "POST",
+      body: { key },
+    },
+  );
+  return raw ? toAttachment(raw) : null;
+}
+
+/**
+ * `GET /api/incidents/{no}/attachments` · 첨부 목록.
+ * ⚠️ `downloadUrl` 은 10분 TTL — 저장하지 말고 화면 열 때마다 부른다.
+ */
+export async function fetchAttachments(incidentNo: string): Promise<Attachment[]> {
+  const raw = await be<BeAttachment[]>(
+    `/api/incidents/${encodeURIComponent(incidentNo)}/attachments`,
+  );
+  if (!Array.isArray(raw)) return [];
+  return raw.map(toAttachment);
 }
