@@ -1,5 +1,5 @@
 /** Live destination is geocoded; there are no scripted alley verdicts or route geometries. */
-export const LIVE_ADDRESS = "경기 성남시 중원구 제일로35번길 51";
+export const LIVE_ADDRESS = "경기 성남시 중원구 둔촌대로69번길 2-1";
 export { FIRE_STATION } from "@/features/dispatch/hooks/use-backend-routes";
 export type StepId = 1 | 2 | 3 | 4 | 5;
 export const STEPS: StepId[] = [1, 2, 3, 4, 5];
