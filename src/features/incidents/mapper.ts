@@ -1,10 +1,13 @@
 import type {
+  Attachment,
   CreateIncidentRequest,
   CreateStoredRoutesRequest,
+  CreateUploadUrlRequest,
   Incident,
   IncidentStatus,
   StoredExcludedReason,
   StoredRoute,
+  UploadUrl,
 } from "./types";
 import { INCIDENT_STATUS } from "./types";
 
@@ -110,5 +113,48 @@ export function toBeStoredRoutesRequest(req: CreateStoredRoutesRequest): Record<
     vehicle_id: req.vehicleId,
     from_lat: req.fromLat,
     from_lon: req.fromLon,
+  };
+}
+
+/* ─────────────────────────────────────────────────────────────
+ * 파일 업로드 · 신고 첨부 (BE #36 · #37 · 2026-09-16)
+ * ─────────────────────────────────────────────────────────────
+ */
+
+export interface BeUploadUrl {
+  upload_url: string;
+  key: string;
+  expires_in_seconds: number;
+}
+
+export interface BeAttachment {
+  key: string;
+  content_type: string;
+  size_bytes: number;
+  download_url: string;
+  created_at: string;
+}
+
+export function toUploadUrl(be: BeUploadUrl): UploadUrl {
+  return {
+    uploadUrl: be.upload_url,
+    key: be.key,
+    expiresInSeconds: be.expires_in_seconds,
+  };
+}
+
+export function toBeUploadUrlRequest(req: CreateUploadUrlRequest): Record<string, unknown> {
+  return {
+    content_type: req.contentType,
+  };
+}
+
+export function toAttachment(be: BeAttachment): Attachment {
+  return {
+    key: be.key,
+    contentType: be.content_type,
+    sizeBytes: be.size_bytes,
+    downloadUrl: be.download_url,
+    createdAt: be.created_at,
   };
 }

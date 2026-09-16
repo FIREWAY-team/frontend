@@ -76,3 +76,66 @@ export interface CreateStoredRoutesRequest {
   fromLat: number;
   fromLon: number;
 }
+
+/* ─────────────────────────────────────────────────────────────
+ * 파일 업로드 · 신고 첨부 (backend #36 · #37 · 2026-09-16)
+ * ─────────────────────────────────────────────────────────────
+ */
+
+/**
+ * BE 허용 업로드 타입 · `docs/api.md` "파일 업로드" 절.
+ * ⚠️ 문자열은 S3 presigned URL 서명 대상 · 상수로 고정.
+ */
+export const UPLOAD_CONTENT_TYPES = {
+  IMAGE_JPEG: "image/jpeg",
+  IMAGE_PNG: "image/png",
+  IMAGE_WEBP: "image/webp",
+  VIDEO_MP4: "video/mp4",
+  VIDEO_QUICKTIME: "video/quicktime",
+} as const;
+
+export type UploadContentType = (typeof UPLOAD_CONTENT_TYPES)[keyof typeof UPLOAD_CONTENT_TYPES];
+
+/** 업로드 상한 (byte). BE 코드와 동일. */
+export const UPLOAD_MAX_BYTES = {
+  IMAGE: 5 * 1024 * 1024, // 5MB
+  VIDEO: 50 * 1024 * 1024, // 50MB
+} as const;
+
+/** 파일 종류 판정 유틸 · 업로드 상한 계산용. */
+export function isVideoContentType(t: UploadContentType): boolean {
+  return t === UPLOAD_CONTENT_TYPES.VIDEO_MP4 || t === UPLOAD_CONTENT_TYPES.VIDEO_QUICKTIME;
+}
+
+/**
+ * `POST /api/files/upload-url` 응답 UI 계약.
+ * ⚠️ `uploadUrl` 은 S3 presigned PUT · 5분 만료 · 발급 후 즉시 사용.
+ * ⚠️ `key` 형식은 `uploads/<YYYY-MM-DD>/<uuid>` — BE 가 형식 검증 (3단계 첨부 확정 시 422).
+ */
+export interface UploadUrl {
+  uploadUrl: string;
+  key: string;
+  expiresInSeconds: number;
+}
+
+export interface CreateUploadUrlRequest {
+  contentType: UploadContentType;
+}
+
+/**
+ * BE `/api/incidents/{no}/attachments` 응답 항목 UI 계약.
+ * ⚠️ `downloadUrl` 은 **10분 TTL** — 화면 열 때마다 목록 재조회 (§CLAUDE.md 지도·이미지·CCTV 스틸).
+ * ⚠️ `contentType` · `sizeBytes` 는 프론트 값이 아니라 BE 가 S3 HEAD 로 재조회한 값.
+ */
+export interface Attachment {
+  key: string;
+  contentType: string;
+  sizeBytes: number;
+  downloadUrl: string;
+  createdAt: string;
+}
+
+/** `POST /api/incidents/{no}/attachments` 요청 body. */
+export interface CreateAttachmentRequest {
+  key: string;
+}
