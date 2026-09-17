@@ -1,5 +1,7 @@
 import "server-only";
 
+import { beHeaders } from "@/features/_shared/be-headers";
+
 import type { BeScenario } from "./mapper";
 import { toScenario } from "./mapper";
 import { MOCK_SCENARIOS } from "./mock/scenarios";
@@ -33,7 +35,7 @@ export async function fetchScenarios(): Promise<ScenariosResult> {
     const res = await fetch(`${BACKEND_API_URL}/api/scenarios`, {
       cache: "no-store",
       signal: controller.signal,
-      headers: { Accept: "application/json" },
+      headers: beHeaders(false),
     });
     if (!res.ok) {
       console.warn(`[scenarios] fetch failed: HTTP ${res.status}`);
