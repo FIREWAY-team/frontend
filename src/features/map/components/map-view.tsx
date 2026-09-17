@@ -3,12 +3,32 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { KakaoCanvas } from "@/components/map/kakao-canvas";
+import type { CctvReading } from "@/features/cctv/types";
 import type { NoGoArea } from "@/features/no-go/types";
 import type { Vehicle } from "@/features/vehicles/types";
 
 import { CctvPopup } from "./cctv-popup";
 import { NoGoOverlay } from "./no-go-overlay";
 import { OverlayToggles } from "./overlay-toggles";
+
+/**
+ * `/map` CCTV 팝업 시연용 placeholder — BE 실 데이터 연결 (§handoff frontend.md) 전 자리 채움.
+ * ⚠️ **실 데이터 아님** — Live 흐름은 별도 (`/live` 에서 마커 클릭 → `/api/cctv/{id}` 실호출).
+ * ⚠️ 지도 진입 데모 팝업이 항상 열려 있는 임시 UX · handoff §D 반영해 새 팝업 계약 실증만.
+ */
+const MAP_PLACEHOLDER_READING: CctvReading = {
+  id: "A41",
+  stillPublicUrl: "https://placehold.co/560x320/1e2a3d/8b96ab?text=CCTV+A41",
+  contentType: "image/jpeg",
+  wallWidthM: 2.6,
+  obstacleWidthM: 0.7,
+  effectiveWidthM: 1.9,
+  verdict: { status: "PASS", "pump-3.5": "PASS", "pump-8": "UNCERTAIN" },
+  confidence: 0.82,
+  measurementStatus: "computed",
+  mediaStatus: "registered",
+  measuredAt: "2026-09-18T14:30:00+09:00",
+};
 
 interface MapViewProps {
   vehicles: Vehicle[];
@@ -112,11 +132,9 @@ export function MapView({ vehicles }: MapViewProps) {
             <div className="pointer-events-none absolute inset-0 flex items-start justify-end p-4">
               <div className="pointer-events-auto">
                 <CctvPopup
-                  edgeId="seongnam_v153_edge_82441"
-                  measuredWidthM={1.9}
+                  reading={MAP_PLACEHOLDER_READING}
+                  displayId="A41"
                   detectedObjects={["parked_truck", "trash_bin"]}
-                  passableProb={{ "pump-3.5": 0.82, "pump-8": 0.15, "pump-15": 0.02 }}
-                  stillUrl="https://placehold.co/560x320/1e2a3d/8b96ab?text=CCTV+042"
                   onClose={() => setPopupOpen(false)}
                 />
               </div>
