@@ -13,19 +13,35 @@ import type { NoGoArea } from "./types";
 const BACKEND_API_URL = process.env.BACKEND_API_URL ?? "http://backend:8080";
 
 /**
+ * bbox — 지도 시야 · GeoJSON 관례 `[minLon, minLat, maxLon, maxLat]` (lon 먼저).
+ * ⚠️ BE `BoundingBox` 는 반대로 lat 먼저다 · BE 가 파싱하면서 뒤집는다. 여기서는 GeoJSON 순서 유지.
+ */
+export interface BBox {
+  minLon: number;
+  minLat: number;
+  maxLon: number;
+  maxLat: number;
+}
+
+/**
  * BE `/api/no_go` 를 서버 사이드에서 부른다. BFF 패턴 — 브라우저가 백엔드 컨테이너에 직접 못 붙는다.
  *
+ * ⚠️ **`bbox` 지정 시 부분 조회** (§BE PR #38 · 2026-09-17) — 지도 시야 안 진입곤란만 받는다.
+ *    범위 밖 · 전량 1,276건 응답으로 지도가 조각조각 느려지는 것을 막는다.
+ *    미지정 시 · 전량 (기존 동작 유지).
  * ⚠️ **실패 시 빈 배열** — 지도 렌더링을 blocking 하지 않는다. 로그는 서버 콘솔에.
  * ⚠️ **5초 timeout** — t3.micro 부팅 중이거나 blue-green 전환 순간에 붙잡히지 않는다.
- * ⚠️ 응답이 커도(1,274건 ≈ 321KB 무압축) BE 가 gzip 을 켜 놨고(§backend PR #21), fetch 는 자동 압축 해제.
- * ⚠️ `revalidate` 대신 `no-store` — 진입곤란 도로가 CCTV 판독 결과로 실시간 뒤집힐 수 있어서
- *    (§layer=3) 캐시하면 오히려 위험. 지도 로드마다 새로 받는다.
+ * ⚠️ `no-store` — 진입곤란 도로가 CCTV 판독 결과로 실시간 뒤집힐 수 있어서(§layer=3) 캐시하면
+ *    오히려 위험. 지도 이동마다 새로 받는다.
  */
-export async function fetchNoGoAreas(): Promise<NoGoArea[]> {
+export async function fetchNoGoAreas(bbox?: BBox): Promise<NoGoArea[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5000);
   try {
-    const res = await fetch(`${BACKEND_API_URL}/api/no_go`, {
+    const url = bbox
+      ? `${BACKEND_API_URL}/api/no_go?bbox=${bbox.minLon},${bbox.minLat},${bbox.maxLon},${bbox.maxLat}`
+      : `${BACKEND_API_URL}/api/no_go`;
+    const res = await fetch(url, {
       cache: "no-store",
       signal: controller.signal,
       headers: beHeaders(false),
