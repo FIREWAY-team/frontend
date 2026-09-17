@@ -1,5 +1,7 @@
 import "server-only";
 
+import { beHeaders } from "@/features/_shared/be-headers";
+
 import type { BeNoGoItem } from "./mapper";
 import { toNoGoArea } from "./mapper";
 import type { NoGoArea } from "./types";
@@ -26,7 +28,7 @@ export async function fetchNoGoAreas(): Promise<NoGoArea[]> {
     const res = await fetch(`${BACKEND_API_URL}/api/no_go`, {
       cache: "no-store",
       signal: controller.signal,
-      headers: { Accept: "application/json" },
+      headers: beHeaders(false),
     });
     if (!res.ok) {
       console.warn(`[no-go] fetch failed: HTTP ${res.status}`);

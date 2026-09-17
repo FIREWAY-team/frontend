@@ -1,5 +1,6 @@
 import "server-only";
 
+import { beHeaders } from "@/features/_shared/be-headers";
 import type { LiveRouteResult } from "@/features/live/use-live-routes";
 
 import type { RouteCandidate } from "./types";
@@ -82,7 +83,7 @@ export async function fetchRoutePlan(input: RoutePlanInput): Promise<LiveRouteRe
       method: "POST",
       cache: "no-store",
       signal: controller.signal,
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: beHeaders(true),
       body: JSON.stringify({
         vehicle_id: input.vehicleId,
         from: input.from,

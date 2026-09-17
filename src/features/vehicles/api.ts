@@ -1,5 +1,7 @@
 import "server-only";
 
+import { beHeaders } from "@/features/_shared/be-headers";
+
 import type { BeVehicle } from "./mapper";
 import { toVehicle } from "./mapper";
 import { MOCK_VEHICLES } from "./mock/vehicles";
@@ -28,7 +30,7 @@ export async function fetchVehicles(): Promise<VehiclesResult> {
     const res = await fetch(`${BACKEND_API_URL}/api/vehicles`, {
       cache: "no-store",
       signal: controller.signal,
-      headers: { Accept: "application/json" },
+      headers: beHeaders(false),
     });
     if (!res.ok) {
       console.warn(`[vehicles] fetch failed: HTTP ${res.status}`);

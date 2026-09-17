@@ -1,5 +1,7 @@
 import "server-only";
 
+import { beHeaders } from "@/features/_shared/be-headers";
+
 import type { BeCctvReading } from "./mapper";
 import { toCctvReading } from "./mapper";
 import type { CctvReading } from "./types";
@@ -20,7 +22,7 @@ export async function fetchCctvReading(id: string): Promise<CctvReading | null> 
     const res = await fetch(`${BACKEND_API_URL}/api/cctv/${encodeURIComponent(id)}`, {
       cache: "no-store",
       signal: controller.signal,
-      headers: { Accept: "application/json" },
+      headers: beHeaders(false),
     });
     if (!res.ok) {
       // 404 는 정상 (없는 id) · 그 외는 경고

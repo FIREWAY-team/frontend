@@ -1,5 +1,7 @@
 import "server-only";
 
+import { beHeaders } from "@/features/_shared/be-headers";
+
 import type { BeAttachment, BeIncident, BeStoredRoute, BeUploadUrl } from "./mapper";
 import {
   toAttachment,
@@ -43,10 +45,7 @@ async function be<T>(
       method: init?.method ?? "GET",
       cache: "no-store",
       signal: controller.signal,
-      headers: {
-        Accept: "application/json",
-        ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      },
+      headers: beHeaders(Boolean(init?.body)),
       body: init?.body ? JSON.stringify(init.body) : undefined,
     });
     if (!res.ok) {
