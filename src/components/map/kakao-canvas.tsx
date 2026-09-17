@@ -16,6 +16,12 @@ interface KakaoCanvasProps {
   children?: ReactNode;
   /** 지도 아래 표시할 라벨 (썸네일에 쓸 때). */
   overlayLabel?: string;
+  /**
+   * 지도 이동·줌 완료 시 · GeoJSON 관례 `[minLon, minLat, maxLon, maxLat]`.
+   * ⚠️ 이벤트 소스는 Kakao Map · `map.getBounds()` 로 sw/ne 를 뽑아 축을 GeoJSON 순서로 뒤집는다.
+   *    호출부는 debounce 를 걸어 폭주 방지 (§CLAUDE.md `bbox` 250ms 규칙).
+   */
+  onBoundsChange?: (bbox: [number, number, number, number]) => void;
 }
 
 /**
@@ -35,6 +41,7 @@ export function KakaoCanvas({
   className,
   children,
   overlayLabel,
+  onBoundsChange,
 }: KakaoCanvasProps) {
   const configured = isKakaoMapConfigured();
 
@@ -91,6 +98,17 @@ export function KakaoCanvas({
         level={level}
         className="h-full w-full"
         style={{ width: "100%", height: "100%" }}
+        onBoundsChanged={
+          onBoundsChange
+            ? (map) => {
+                // Kakao Map `LatLngBounds` — sw/ne. GeoJSON 관례 (minLon 먼저) 로 뒤집는다.
+                const b = map.getBounds();
+                const sw = b.getSouthWest();
+                const ne = b.getNorthEast();
+                onBoundsChange([sw.getLng(), sw.getLat(), ne.getLng(), ne.getLat()]);
+              }
+            : undefined
+        }
       >
         {children}
       </Map>
