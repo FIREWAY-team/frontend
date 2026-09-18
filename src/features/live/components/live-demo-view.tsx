@@ -16,6 +16,7 @@ import {
   STEPS,
 } from "../moran-scenario";
 import { useLiveRoutes } from "../use-live-routes";
+import { LiveCctvLayer } from "./live-cctv-layer";
 
 /** Live 시연 화점 설명 · 신고 접수 payload 로 사용 · 심사 시연에서 "실 접수" 신호. */
 const LIVE_INCIDENT_SUMMARY = "라이브 시연 · 중원구 주소 지오코딩 화점 · 소방차 진입 필요";
@@ -153,6 +154,8 @@ export function LiveDemoView() {
                 strokeOpacity={0.65}
               />
             ))}
+          {/* 실 CCTV 12개 마커 · 3단계 이후 노출 · 클릭 시 팝업 (§handoff frontend.md #1). */}
+          {step >= 3 && <LiveCctvLayer vehicleId={vehicleId} />}
           {step >= 4 &&
             (step === 4 ? (best ? [best] : []) : routes).map((r) => (
               <Polyline
