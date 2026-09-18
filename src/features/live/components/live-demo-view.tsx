@@ -29,7 +29,10 @@ export function LiveDemoView() {
   const [revision, setRevision] = useState(0);
   const { data, error, loading } = useLiveRoutes(destination, vehicleId, step >= 3, revision);
   const routes = data?.routes ?? [];
-  const best = routes.find((r) => r.passableForVehicle === true && !r.hasUnresolvedStaticNoGo);
+  // 통과 가능 후보가 없으면 첫 후보를 "차선책" 으로 보여준다 · 시연 흐름 유지 (§handoff frontend.md).
+  // explanation 에 라우터 폴백/제약이 그대로 실려 심사자가 상태를 알 수 있다.
+  const best =
+    routes.find((r) => r.passableForVehicle === true && !r.hasUnresolvedStaticNoGo) ?? routes[0];
   const vehicle = LIVE_VEHICLES.find((v) => v.id === vehicleId)!;
 
   // 실제 접수된 신고 · null 이면 아직 접수 전이거나 BE 실패 (조용히 fallthrough).
