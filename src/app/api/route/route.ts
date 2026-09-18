@@ -26,11 +26,16 @@ export async function POST(request: Request) {
   const to = body.to;
   const k = typeof body.k === "number" ? body.k : 3;
 
+  // BE 는 폴백 직선 반환 중이라 오래 걸린다. 3초 timeout 으로 감싸 OSRM 응답을 막지 않는다.
+  const beFallback = details ? { routes: [] as RouteCandidate[], assessments: [] as unknown[], warnings: [] as string[] } : ([] as RouteCandidate[]);
   const [beResult, osrmRoutes] = await Promise.all([
-    (details ? fetchRoutePlan : fetchRoutes)({
-      vehicleId: String(body.vehicleId ?? body.vehicle_id ?? "pump-3.5"),
-      from, to, k,
-    }).catch(() => (details ? { routes: [], assessments: [], warnings: [] } : [])),
+    Promise.race([
+      (details ? fetchRoutePlan : fetchRoutes)({
+        vehicleId: String(body.vehicleId ?? body.vehicle_id ?? "pump-3.5"),
+        from, to, k,
+      }).catch(() => beFallback),
+      new Promise((resolve) => setTimeout(() => resolve(beFallback), 3_000)),
+    ]) as Promise<typeof beFallback>,
     fetchOsrmRoutes(from, to, k).catch((err) => {
       console.warn(`[route:osrm] ${err instanceof Error ? err.message : String(err)}`);
       return [] as RouteCandidate[];
