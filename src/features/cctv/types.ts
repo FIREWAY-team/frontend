@@ -16,8 +16,17 @@ export interface CctvReading {
    * ⚠️ 확장자로 image/video 판별 금지 · `contentType` 사용 (§handoff frontend.md D).
    */
   stillPublicUrl: string | null;
-  /** MIME 타입 (`image/jpeg`, `image/png`, `video/mp4`, `video/quicktime` 등). 미상이면 undefined. */
+  /**
+   * MIME 타입 (`image/jpeg`, `image/png`, `video/mp4`, `video/quicktime` 등). 미상이면 undefined.
+   * ⚠️ BE 응답에 `media_content_type` 또는 `content_type` 어느 이름으로 오든 매퍼가 흡수 (§handoff 스펙).
+   */
   contentType?: string;
+  /**
+   * 프리사인드 미디어 URL 만료 남은 초 (BE `media_url_expires_in_seconds` · 응답 시각 기준).
+   * ⚠️ 팝업이 이 값 - 안전마진 (30초) 지나면 자동 재조회 · 심사가 팝업 오래 열어놔도 미디어 안 깨짐.
+   * ⚠️ null 이면 재조회 안 함 (BE 가 안 내려주는 경우).
+   */
+  mediaUrlExpiresInSeconds?: number;
   /** m 단위. 도로 벽 사이 폭. */
   wallWidthM: number;
   /** m 단위. 감지된 장애물 총 폭. */
