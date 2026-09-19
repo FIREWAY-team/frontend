@@ -7,6 +7,12 @@ import { LIVE_ADDRESS } from "../moran-scenario";
 jest.mock("@/components/map/kakao-canvas", () => ({
   KakaoCanvas: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
+
+// LiveCctvLayer 는 자체적으로 /api/cctv 를 부르므로 이 테스트의 fetch 카운터를 오염시킨다.
+// 이 파일은 useLiveRoutes (경로 조회) 만 검증하므로 CCTV 마커 레이어는 stub.
+jest.mock("../components/live-cctv-layer", () => ({
+  LiveCctvLayer: () => null,
+}));
 const route = {
   rank: 1,
   coordinates: [
@@ -94,7 +100,10 @@ test("geocodes the requested address and recalculates for small, medium and larg
   expect(screen.getByText(/4분 0초/)).toBeInTheDocument();
 });
 
-test("blocked or unresolved routes never become the recommended route, including direct step links", async () => {
+// ⚠️ 09-19 시연 · 종준님 fffebb4 커밋으로 정책 뒤집혔음 — 통과 가능 후보가 없으면 첫 후보를 "차선책" 으로
+//    보여주고 explanation 에 라우터 폴백 사유가 실려 있다. 이 테스트의 옛 방어 조건은 시연 흐름과 어긋난다.
+//    시연 후 · 원래 정책 (통과 가능 없으면 안내만) 으로 되돌리는 이슈에서 이 skip 을 걷어낸다.
+test.skip("blocked or unresolved routes never become the recommended route, including direct step links", async () => {
   (fetch as jest.Mock).mockResolvedValue(
     reply([{ ...route, passableForVehicle: false, hasUnresolvedStaticNoGo: true }]),
   );

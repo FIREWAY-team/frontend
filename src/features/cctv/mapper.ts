@@ -23,11 +23,15 @@ export interface BeCctvReading {
   effective_width_m: number;
   verdict: Record<string, string> | string;
   confidence: number;
+  /** 스펙 확정된 필드는 `media_content_type` · 옛 배포 하위 호환용 `content_type` 도 받음. */
   content_type?: string | null;
+  media_content_type?: string | null;
   measurement_status?: string | null;
   measurement_failure_at?: string | null;
   media_status?: string | null;
   measured_at?: string | null;
+  /** 프리사인드 미디어 URL 만료 남은 초 · 응답 시각 기준 (§handoff 스펙 09-18). */
+  media_url_expires_in_seconds?: number | null;
   demo_assignment?: BeDemoAssignment | null;
 }
 
@@ -67,7 +71,12 @@ export function toCctvReading(be: BeCctvReading): CctvReading {
   return {
     id: be.cctv_id,
     stillPublicUrl: be.still_public_url ?? null,
-    contentType: be.content_type ?? undefined,
+    // 스펙은 media_content_type · 옛 배포는 content_type · 둘 다 흡수 (§brief 09-19).
+    contentType: be.media_content_type ?? be.content_type ?? undefined,
+    mediaUrlExpiresInSeconds:
+      typeof be.media_url_expires_in_seconds === "number"
+        ? be.media_url_expires_in_seconds
+        : undefined,
     wallWidthM: be.wall_width_m,
     obstacleWidthM: be.obstacle_width_m,
     effectiveWidthM: be.effective_width_m,
