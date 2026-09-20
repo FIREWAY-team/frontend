@@ -16,6 +16,16 @@ interface UseBackendRoutesInput {
   vehicleId: string;
 }
 
+export interface UseBackendRoutesResult {
+  routes: RouteCandidate[];
+  /**
+   * 서버에서 아직 응답이 안 왔거나 · 요청 key 가 갱신되어 이전 스냅샷이 유효하지 않은 상태.
+   * ⚠️ UI 는 이 값으로 "확정 가능한 경로가 없습니다" (empty) 와 "계산 중" (loading) 을 구분한다.
+   *    구분 없이 empty 만 뜨면 심사원이 시스템이 꺼진 것으로 오해한다 (§09-20 URL 심사 대응).
+   */
+  loading: boolean;
+}
+
 /**
  * 화점 + 차량 id 를 받아 프론트의 `/api/route` Route Handler 로 요청. Handler 는 서버 사이드에서
  * BE `POST /api/route` 를 부르고 그 응답(3층 의사결정 완결)을 그대로 돌려준다.
@@ -27,7 +37,7 @@ interface UseBackendRoutesInput {
 export function useBackendRoutes({
   destination,
   vehicleId,
-}: UseBackendRoutesInput): RouteCandidate[] {
+}: UseBackendRoutesInput): UseBackendRoutesResult {
   const [snapshot, setSnapshot] = useState<{ key: string; value: RouteCandidate[] }>({
     key: "",
     value: [],
@@ -65,5 +75,9 @@ export function useBackendRoutes({
     };
   }, [key, destination, vehicleId]);
 
-  return snapshot.key === key ? snapshot.value : [];
+  const isCurrent = snapshot.key === key;
+  return {
+    routes: isCurrent ? snapshot.value : [],
+    loading: Boolean(destination) && !isCurrent,
+  };
 }

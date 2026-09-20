@@ -14,8 +14,15 @@ interface MapViewProps {
   vehicles: Vehicle[];
 }
 
-/** 성남 중원구 대략 중심. */
-const DEFAULT_CENTER = { lat: 37.432, lon: 127.145 };
+/**
+ * 초기 지도 중심 — CCTV 마커 12개 (모란시장) 밀집 지역.
+ * ⚠️ 이전 값 (37.432, 127.145) 은 성남소방서 부근 · 진입 시 CCTV 마커가 화면 밖에 있어
+ *    심사원이 "판독 결과 없음" 으로 오해할 수 있었다 (§09-20 검토).
+ */
+const DEFAULT_CENTER = { lat: 37.431, lon: 127.1276 };
+
+/** CCTV 마커 12개가 한 화면에 들어오는 확대 수준. */
+const DEFAULT_LEVEL = 3;
 
 /** 지도 이동·줌 후 · bbox 재조회 debounce (ms). §CLAUDE.md `bbox` 규칙. */
 const BBOX_DEBOUNCE_MS = 250;
@@ -100,7 +107,7 @@ export function MapView({ vehicles }: MapViewProps) {
         <div className="relative flex min-h-0 flex-1 flex-col">
           <KakaoCanvas
             center={DEFAULT_CENTER}
-            level={5}
+            level={DEFAULT_LEVEL}
             overlayLabel="관할 지도 · 성남시 중원구"
             onBoundsChange={handleBoundsChange}
           >
