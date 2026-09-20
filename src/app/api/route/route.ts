@@ -36,15 +36,22 @@ const OSRM_URL = "https://router.project-osrm.org";
  * 라이브에서 `passableForVehicle: false` 인데 `excludedReasons: []` 로 나가 화면이 이유를
  * 못 보여주던 것이 정확히 이 조합이었다.
  */
-type VehicleRouteProfile = {
+type VehicleRouteProfileBase = {
   via: [number, number];
   passableProb: number;
   cctvIds: string[];
   label: string;
-} & (
-  | { passable: true; unresolved: false; excluded?: never }
-  | { passable: false; unresolved: boolean; excluded: ExcludedReason[] }
-);
+};
+
+// 교집합(Base & (A | B)) 이 아니라 갈래마다 통째로 적는다. 순수 판별 유니온이어야
+// profile.passable 로 좁히는 게 보장된다 — 이 저장소엔 타입을 잡아줄 CI 가 없다.
+type VehicleRouteProfile =
+  | (VehicleRouteProfileBase & { passable: true; unresolved: false })
+  | (VehicleRouteProfileBase & {
+      passable: false;
+      unresolved: boolean;
+      excluded: ExcludedReason[];
+    });
 
 const VEHICLE_ROUTE_PROFILE: Record<string, VehicleRouteProfile> = {
   "pump-3.5": {
