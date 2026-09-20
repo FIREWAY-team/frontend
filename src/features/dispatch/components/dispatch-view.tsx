@@ -237,26 +237,20 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
                 title={scenario.title}
               />
             )}
-            {/* 3 차량 최적 경로를 한꺼번에 렌더 — 선택된 차량이 맨 위에 오도록 마지막 렌더. */}
-            {[...vehicleBestRoutes]
-              .sort((a, b) => {
-                const aActive = a.vehicle.id === activeVehicleId ? 1 : 0;
-                const bActive = b.vehicle.id === activeVehicleId ? 1 : 0;
-                return aActive - bActive;
-              })
-              .map(({ vehicle: routeVehicle, route }) => {
-                const isActive = routeVehicle.id === activeVehicleId;
-                return (
-                  <Polyline
-                    key={routeVehicle.id}
-                    path={toKakaoPath(route.coordinates)}
-                    strokeWeight={isActive ? 7 : 4}
-                    strokeColor={vehicleRouteColor(routeVehicle.id)}
-                    strokeOpacity={isActive ? 0.95 : 0.55}
-                    strokeStyle={route.passableForVehicle === false ? "shortdash" : "solid"}
-                  />
-                );
-              })}
+            {/* 3 차량 최적 경로를 한꺼번에 렌더 — 선택된 차량은 굵고 진하게, 나머지는 얇게. */}
+            {vehicleBestRoutes.map(({ vehicle: routeVehicle, route }) => {
+              const isActive = routeVehicle.id === activeVehicleId;
+              return (
+                <Polyline
+                  key={routeVehicle.id}
+                  path={toKakaoPath(route.coordinates)}
+                  strokeWeight={isActive ? 7 : 4}
+                  strokeColor={vehicleRouteColor(routeVehicle.id)}
+                  strokeOpacity={isActive ? 0.95 : 0.55}
+                  strokeStyle={route.passableForVehicle === false ? "shortdash" : "solid"}
+                />
+              );
+            })}
           </KakaoCanvas>
 
           {scenario && <IntakeOverlay scenario={scenario} />}

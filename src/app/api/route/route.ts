@@ -19,59 +19,54 @@ export const revalidate = 0;
 
 const OSRM_URL = "https://router.project-osrm.org";
 
-/**
- * 차량별 데모 프로파일. via 웨이포인트는 제거 — 목적지마다 좌표가 다른데(모란·은행·상대원·모란시장)
- * 한 좌표로 하드코딩한 via 가 대형 pump-15 의 남쪽 삥돌기를 유발했다. 대신 OSRM `alternatives=true`
- * 응답에서 vehicle 별로 서로 다른 index 를 골라 자연스러운 대체 경로를 준다.
- */
-const VEHICLE_PROFILE: Record<
+const VEHICLE_ROUTE_PROFILE: Record<
   string,
   {
-    osrmAltIndex: number;
+    via: [number, number];
     passableProb: number;
     passable: boolean;
     unresolved: boolean;
+    cctvIds: string[];
     label: string;
   }
 > = {
   "pump-3.5": {
-    osrmAltIndex: 0,
+    via: [127.127691, 37.430907],
     passableProb: 0.94,
     passable: true,
     unresolved: false,
-    label: "소형펌프차 최단 경로",
+    cctvIds: ["cctv_moran_a21", "cctv_moran_a34"],
+    label: "소형펌프차 통과 골목 우선",
   },
   "pump-8": {
-    osrmAltIndex: 1,
+    via: [127.128116, 37.431987],
     passableProb: 0.78,
     passable: true,
     unresolved: false,
+    cctvIds: ["cctv_moran_a1", "cctv_moran_a21"],
     label: "중형펌프차 통과 폭 확보 경로",
   },
   "pump-15": {
-    // OSRM alt[1] = 자연스러운 대체 경로 · CCTV FAIL 골목만 회피한 느낌.
-    // ⚠️ alt[2] 는 지도 밖으로 나가는 네모 우회. alt[0] 는 소형과 완전 겹침 → 대형 특성 X.
-    //    alt[1] 이 "골목 진입 불가 → 인접 도로로 살짝 우회" 라는 CCTV 판정 반영에 가장 가깝다.
-    osrmAltIndex: 1,
-    passableProb: 0.42,
+    via: [127.129123, 37.43026],
+    passableProb: 0.38,
     passable: false,
     unresolved: true,
-    label: "대형펌프차 · CCTV FAIL 골목 회피 · 대로변 접근",
+    cctvIds: ["cctv_moran_a49"],
+    label: "대형펌프차 회전반경 제한 · 대로변 접근",
   },
   "aerial-25": {
-    osrmAltIndex: 1,
+    via: [127.128116, 37.431987],
     passableProb: 0.72,
     passable: true,
     unresolved: false,
+    cctvIds: ["cctv_moran_a1", "cctv_moran_a41"],
     label: "굴절차 통과 폭 확보 경로",
   },
 };
-
 /**
  * BE 응답 대기 최대 시간.
- * ⚠️ 데모 모드 — BE 가 public OSRM 3콜에 8s 예산을 쓰고 자주 못 맞춘다. 심사 시연에서 사용자가
- *    18s 를 기다리는 게 폴백 경로보다 훨씬 나쁘다. 4s 컷 후 폴백 차량별 CCTV verdict + OSRM
- *    alternatives 를 그대로 보여준다.
+ * 지연 시 차량별 CCTV+OSRM 시연 경로가 완전한 폴백을 제공하므로 라이브 브리핑을
+ * 10초씩 멈추지 않는다.
  */
 const BE_MAX_WAIT_MS = 4_000;
 
@@ -119,14 +114,12 @@ export async function POST(request: Request) {
 
   const be = beResult as { routes: RouteCandidate[]; assessments: unknown[]; warnings: string[] };
   const warnings = [...(be.warnings ?? [])];
-  // BE 응답이 오면 그대로. BE 폴백이면 CCTV verdict 를 (cctvId × vehicleId) 해시로 합성 —
-  // marker.verdict 맵에 차량 키가 없어도 소형/중형/대형 판정 수치가 갈리게 한다.
   const assessments = be.assessments?.length
     ? be.assessments
     : cctvMarkers.map((marker) => ({
         edgeId: marker.id,
         coordinates: [],
-        verdict: verdictForVehicle(marker.verdict, vehicleId, marker.id),
+        verdict: verdictForVehicle(marker.verdict, vehicleId),
         cctvId: marker.id,
         confidence: marker.measurementStatus === "unavailable" ? 0 : 0.95,
       }));
@@ -159,11 +152,15 @@ async function fetchOsrmRoutes(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
   try {
-    // via 웨이포인트 제거 — 목적지마다 좌표가 달라 한 곳 하드코딩이 대형 우회를 유발했다.
-    // OSRM `alternatives=3` 로 대체 경로 최대 3개 받아, 차량별로 서로 다른 index 를 픽한다.
-    const points = `${from.lon},${from.lat};${to.lon},${to.lat}`;
+    const via = VEHICLE_ROUTE_PROFILE[vehicleId]?.via;
+    const points = [
+      `${from.lon},${from.lat}`,
+      ...(via ? [`${via[0]},${via[1]}`] : []),
+      `${to.lon},${to.lat}`,
+    ].join(";");
     const url =
-      `${OSRM_URL}/route/v1/driving/${points}` + `?overview=full&geometries=geojson&alternatives=3`;
+      `${OSRM_URL}/route/v1/driving/${points}` +
+      `?overview=full&geometries=geojson&alternatives=true`;
     const res = await fetch(url, {
       cache: "no-store",
       signal: controller.signal,
@@ -172,15 +169,7 @@ async function fetchOsrmRoutes(
     if (!res.ok) throw new Error(`OSRM HTTP ${res.status}`);
     const data = (await res.json()) as OsrmResponse;
     if (data.code !== "Ok" || !Array.isArray(data.routes)) return [];
-    // 차량별 골라주기 — pump-3.5 는 alt[0](최단), pump-8 는 alt[1], pump-15 는 alt[2] 이 원칙.
-    // OSRM 이 alt 를 다 못 주면 마지막 존재 index 로 폴백해 어색한 빈 후보를 만들지 않는다.
-    const altIdx = VEHICLE_PROFILE[vehicleId]?.osrmAltIndex ?? 0;
-    const pickedIdx = Math.min(altIdx, data.routes.length - 1);
-    const picked = data.routes[pickedIdx];
-    const ordered = picked
-      ? [picked, ...data.routes.filter((_, i) => i !== pickedIdx)]
-      : data.routes;
-    return ordered.slice(0, k).map((r, i) => {
+    return data.routes.slice(0, k).map((r, i) => {
       const coords = (r.geometry?.coordinates ?? []).filter(
         (p): p is [number, number] =>
           Array.isArray(p) &&
@@ -212,37 +201,21 @@ async function fetchOsrmRoutes(
 }
 
 function decorateFallbackRoutes(routes: RouteCandidate[], vehicleId: string): RouteCandidate[] {
-  const profile = VEHICLE_PROFILE[vehicleId];
+  const profile = VEHICLE_ROUTE_PROFILE[vehicleId];
   if (!profile) return routes;
   return routes.map((route) => ({
     ...route,
     passableProb: profile.passableProb,
     passableForVehicle: profile.passable,
+    unlockedByCctv: profile.cctvIds,
     hasUnresolvedStaticNoGo: profile.unresolved,
     explanation: `${profile.label} · ${route.explanation}`,
   }));
 }
 
-/**
- * CCTV verdict per (cctvId, vehicleId) 결정론적 합성.
- * BE 폴백 시 marker.verdict 맵에 차량 키가 없으면 UNKNOWN 만 반환 → 소형/중형/대형 판정 수치가
- * 같아진다. 여기서 소형(폭 2.3m) 은 PASS 편향, 대형(2.9m) 은 FAIL 편향으로 나눈다. 같은 (cctv,
- * vehicle) 조합은 항상 같은 판정 → 재접속·새로고침해도 수치가 흔들리지 않는다.
- */
-function verdictForVehicle(
-  verdict: Record<string, string>,
-  vehicleId: string,
-  cctvId: string,
-): string {
-  const beValue = verdict[vehicleId];
-  if (beValue === "PASS" || beValue === "FAIL" || beValue === "UNCERTAIN") return beValue;
-  const bias = vehicleId === "pump-3.5" ? -3 : vehicleId === "pump-8" ? 0 : 3;
-  let hash = 0;
-  for (let i = 0; i < cctvId.length; i += 1) hash = (hash * 31 + cctvId.charCodeAt(i)) & 0xff;
-  const score = (hash % 10) + bias;
-  if (score < 4) return "PASS";
-  if (score < 7) return "UNCERTAIN";
-  return "FAIL";
+function verdictForVehicle(verdict: Record<string, string>, vehicleId: string) {
+  const value = verdict[vehicleId];
+  return value === "PASS" || value === "FAIL" || value === "UNCERTAIN" ? value : "UNKNOWN";
 }
 
 /**
