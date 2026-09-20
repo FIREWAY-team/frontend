@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { fetchCctvMarkers } from "@/features/cctv/api";
 import { fetchRoutePlan, fetchRoutes } from "@/features/dispatch/api";
-import type { RouteCandidate } from "@/features/dispatch/types";
+import type { ExcludedReason, RouteCandidate } from "@/features/dispatch/types";
 
 /**
  * `/api/route` — 브라우저 fetch 프록시.
@@ -19,17 +19,41 @@ export const revalidate = 0;
 
 const OSRM_URL = "https://router.project-osrm.org";
 
-const VEHICLE_ROUTE_PROFILE: Record<
-  string,
-  {
-    via: [number, number];
-    passableProb: number;
-    passable: boolean;
-    unresolved: boolean;
-    cctvIds: string[];
-    label: string;
-  }
-> = {
+/**
+ * 차량별 시연 경로 프로파일.
+ *
+ * ⚠️ **여기 값은 BE 3층 판단이 아니라 시연용 데코레이션이다.** BE 가 BE_MAX_WAIT_MS 안에
+ *    응답하면 BE 값이 쓰이고, 늦으면 OSRM 경로 위에 이 프로파일이 덧씌워진다.
+ *
+ * ⚠️ 2026-09-20 정정 — pump-15 가 `passable: false` · "회전반경 제한" 으로 박혀 있었다.
+ *    (1) 회전반경은 BE 가 판단에 쓰지 않는다. 판단 축은 정적 진입곤란 × CCTV 판정 × **폭**
+ *        셋뿐이고 `turning_radius_m` 은 DTO 밖에서 참조되지 않는다. 화면에만 있던 근거였다.
+ *    (2) CCTV 판정표(V5_3 · 유강현 확정)에서 pump-15 는 a1 · a17 · a41 · a49 네 곳이 PASS 다.
+ *        via 로 쓰는 a49 도 그중 하나인데 통행 불가로 표시하고 있었다.
+ *    판정표와 일치시키고 근거 없는 제약 문구는 뺀다.
+ *
+ * 타입이 "막혔다는데 이유가 없는" 상태를 금지한다 — passable: false 면 excluded 가 필수다.
+ * 라이브에서 `passableForVehicle: false` 인데 `excludedReasons: []` 로 나가 화면이 이유를
+ * 못 보여주던 것이 정확히 이 조합이었다.
+ */
+type VehicleRouteProfileBase = {
+  via: [number, number];
+  passableProb: number;
+  cctvIds: string[];
+  label: string;
+};
+
+// 교집합(Base & (A | B)) 이 아니라 갈래마다 통째로 적는다. 순수 판별 유니온이어야
+// profile.passable 로 좁히는 게 보장된다 — 이 저장소엔 타입을 잡아줄 CI 가 없다.
+type VehicleRouteProfile =
+  | (VehicleRouteProfileBase & { passable: true; unresolved: false })
+  | (VehicleRouteProfileBase & {
+      passable: false;
+      unresolved: boolean;
+      excluded: ExcludedReason[];
+    });
+
+const VEHICLE_ROUTE_PROFILE: Record<string, VehicleRouteProfile> = {
   "pump-3.5": {
     via: [127.127691, 37.430907],
     passableProb: 0.94,
@@ -47,12 +71,20 @@ const VEHICLE_ROUTE_PROFILE: Record<
     label: "중형펌프차 통과 폭 확보 경로",
   },
   "pump-15": {
-    via: [127.129123, 37.43026],
-    passableProb: 0.38,
-    passable: false,
-    unresolved: true,
-    cctvIds: ["cctv_moran_a49"],
-    label: "대형펌프차 회전반경 제한 · 대로변 접근",
+    // cctv_moran_a41 (37.4314, 127.12819) · pump-15 PASS 판정 지점이다.
+    //
+    // a49 에서 옮겼다. a49 는 목적지보다 238m 남쪽이라 경로가 목적지를 지나쳤다 되돌아왔고
+    // 지도에서 꺾여 보였다(§09-20 라이브 브리핑 지적). a41 은 111m 로 절반 이하고 거리도
+    // 2218m -> 2140m 로 짧다. a1(2074m)이 가장 짧지만 pump-8·aerial-25 가 이미 써서
+    // 차종별로 다른 경로가 나오는 시연이 죽는다.
+    via: [127.12819, 37.4314],
+    // pump-8(0.78)보다 낮게 둔다 — 폭 2.9m 라 통과 판정 골목이 더 적다(a21 은 UNCERTAIN).
+    passableProb: 0.74,
+    passable: true,
+    unresolved: false,
+    // via 가 a41 이므로 이 경로가 실제로 지나는 PASS 지점만 적는다. 안 지나는 곳은 넣지 않는다.
+    cctvIds: ["cctv_moran_a41"],
+    label: "대형펌프차 통과 골목 우회 · CCTV 판정 근거",
   },
   "aerial-25": {
     via: [127.128116, 37.431987],
@@ -63,11 +95,30 @@ const VEHICLE_ROUTE_PROFILE: Record<
     label: "굴절차 통과 폭 확보 경로",
   },
 };
+
 /**
  * BE 응답 대기 최대 시간.
  * 지연 시 차량별 CCTV+OSRM 시연 경로가 완전한 폴백을 제공하므로 라이브 브리핑을
  * 10초씩 멈추지 않는다.
  */
+/**
+ * CCTV 판독 커버리지. 12 대가 전부 모란에 몰려 있다(cctv_moran_a1 … a59 · 실측 범위
+ * lat 37.42997~37.432279 · lon 127.12609~127.129123). 그 바깥에는 골목을 해제할 근거가 없다.
+ *
+ * 반경 800m 는 모란시장 화점(중심에서 247m)을 넉넉히 담고 은행1동(1,485m)·상대원1동(3,234m)은
+ * 확실히 뺀다. CCTV 를 다른 동으로 넓히면 이 값도 같이 손봐야 한다.
+ */
+const CCTV_COVERAGE = { lat: 37.43112, lon: 127.12761, radiusM: 800 };
+
+function withinCctvCoverage(to: unknown): boolean {
+  if (!to || typeof to !== "object") return false;
+  const { lat, lon } = to as { lat?: unknown; lon?: unknown };
+  if (typeof lat !== "number" || typeof lon !== "number") return false;
+  const dy = (lat - CCTV_COVERAGE.lat) * 111_132;
+  const dx = (lon - CCTV_COVERAGE.lon) * 88_400; // 위도 37.43 에서 경도 1도
+  return Math.hypot(dx, dy) <= CCTV_COVERAGE.radiusM;
+}
+
 const BE_MAX_WAIT_MS = 4_000;
 
 export async function POST(request: Request) {
@@ -79,6 +130,9 @@ export async function POST(request: Request) {
   const vehicleId = String(body.vehicleId ?? body.vehicle_id ?? "pump-3.5");
   // 상황실 데모 · mode="shortest" 는 via 웨이포인트·차량 프로파일 데코 건너뛰고 순수 OSRM 최단.
   const shortest = body.mode === "shortest";
+  // 커버리지 밖이면 프로파일을 안 쓴다. 안 그러면 은행1동(801m)이 모란을 찍고 오느라
+  // 4,246m 가 되고, CCTV 가 없는 구역에서 CCTV 해제를 주장하게 된다.
+  const useProfile = !shortest && withinCctvCoverage(to);
 
   const beFallback = details
     ? { routes: [] as RouteCandidate[], assessments: [] as unknown[], warnings: [] as string[] }
@@ -93,14 +147,14 @@ export async function POST(request: Request) {
       }).catch(() => beFallback),
       new Promise((resolve) => setTimeout(() => resolve(beFallback), BE_MAX_WAIT_MS)),
     ]) as Promise<typeof beFallback>,
-    fetchOsrmRoutes(from, to, k, vehicleId, shortest).catch((err) => {
+    fetchOsrmRoutes(from, to, k, vehicleId, !useProfile).catch((err) => {
       console.warn(`[route:osrm] ${err instanceof Error ? err.message : String(err)}`);
       return [] as RouteCandidate[];
     }),
     details ? fetchCctvMarkers() : Promise.resolve([]),
   ]);
 
-  const osrmRoutes = shortest ? rawOsrmRoutes : decorateFallbackRoutes(rawOsrmRoutes, vehicleId);
+  const osrmRoutes = useProfile ? decorateFallbackRoutes(rawOsrmRoutes, vehicleId) : rawOsrmRoutes;
 
   const beRoutes: RouteCandidate[] = details
     ? ((beResult as { routes: RouteCandidate[] }).routes ?? [])
@@ -125,6 +179,11 @@ export async function POST(request: Request) {
         cctvId: marker.id,
         confidence: marker.measurementStatus === "unavailable" ? 0 : 0.95,
       }));
+  if (!useProfile && !shortest) {
+    warnings.push(
+      "cctv_coverage: CCTV 판독 구역(모란) 밖입니다. 골목 해제 근거가 없어 도로 기반 경로만 제공합니다.",
+    );
+  }
   if (!beRoutes.length && osrmRoutes.length) {
     warnings.push("route_source: BE 지연 · 차량별 CCTV 판정과 OSRM 시연 경로를 사용.");
   } else if (osrmRoutes.length) {
@@ -214,6 +273,9 @@ function decorateFallbackRoutes(routes: RouteCandidate[], vehicleId: string): Ro
     unlockedByCctv: profile.cctvIds,
     hasUnresolvedStaticNoGo: profile.unresolved,
     explanation: `${profile.label} · ${route.explanation}`,
+    // 통행 불가로 표시하면 막은 구간을 반드시 같이 내려준다. 근거 없는 "불가" 는 화면에서
+    // 이유를 못 보여준다 — 타입이 이미 막지만 응답까지 이어져야 의미가 있다.
+    excludedReasons: profile.passable ? [] : profile.excluded,
   }));
 }
 
