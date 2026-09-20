@@ -158,34 +158,45 @@ export function LiveDemoView() {
             position={{ lat: destination.lat, lng: destination.lon }}
             title={LIVE_ADDRESS}
           />
-          {step >= 3 &&
-            data?.assessments.map((a) => (
-              <Polyline
-                key={a.edgeId}
-                path={a.coordinates.map(([lng, lat]) => ({ lat, lng }))}
-                strokeWeight={6}
-                strokeColor={
-                  a.verdict === "PASS" ? "#22c55e" : a.verdict === "FAIL" ? "#ef4444" : "#eab308"
-                }
-                strokeOpacity={0.65}
-              />
-            ))}
+          {/* 판정 폴리라인은 step 3(CCTV 판독) 에서만 노출. step 4(통합 경로) 이후엔 경로가 판정선에
+              가려져 안 보인다 — 판정 결과는 우측 패널의 카운트/리스트로 계속 확인 가능. */}
+          {step === 3 &&
+            data?.assessments
+              .filter((a) => a.coordinates.length > 0)
+              .map((a) => (
+                <Polyline
+                  key={a.edgeId}
+                  path={a.coordinates.map(([lng, lat]) => ({ lat, lng }))}
+                  strokeWeight={6}
+                  strokeColor={
+                    a.verdict === "PASS" ? "#22c55e" : a.verdict === "FAIL" ? "#ef4444" : "#eab308"
+                  }
+                  strokeOpacity={0.65}
+                />
+              ))}
           {/* 실 CCTV 12개 마커 · 3단계 이후 노출 · 클릭 시 팝업 (§handoff frontend.md #1). */}
           {step >= 3 && <LiveCctvLayer vehicleId={vehicleId} />}
+          {/* 선택된 차량이 항상 맨 위에 그려지도록 마지막에 렌더. */}
           {step >= 4 &&
-            vehicleRoutes.map(
-              ({ vehicle: routeVehicle, route }) =>
-                route && (
-                  <Polyline
-                    key={routeVehicle.id}
-                    path={route.coordinates.map(([lng, lat]) => ({ lat, lng }))}
-                    strokeWeight={routeVehicle.id === vehicleId ? 8 : 5}
-                    strokeColor={vehicleRouteColor(routeVehicle.id)}
-                    strokeOpacity={routeVehicle.id === vehicleId ? 0.95 : 0.58}
-                    strokeStyle={route.passableForVehicle ? "solid" : "dash"}
-                  />
-                ),
-            )}
+            [...vehicleRoutes]
+              .sort((a, b) => {
+                const aActive = a.vehicle.id === vehicleId ? 1 : 0;
+                const bActive = b.vehicle.id === vehicleId ? 1 : 0;
+                return aActive - bActive;
+              })
+              .map(
+                ({ vehicle: routeVehicle, route }) =>
+                  route && (
+                    <Polyline
+                      key={routeVehicle.id}
+                      path={route.coordinates.map(([lng, lat]) => ({ lat, lng }))}
+                      strokeWeight={routeVehicle.id === vehicleId ? 8 : 5}
+                      strokeColor={vehicleRouteColor(routeVehicle.id)}
+                      strokeOpacity={routeVehicle.id === vehicleId ? 0.95 : 0.58}
+                      strokeStyle={route.passableForVehicle ? "solid" : "dash"}
+                    />
+                  ),
+              )}
         </KakaoCanvas>
 
         {/* 접수 번호 배지 · 2단계 이후 상시 노출 · "실 접수됐다" 신호. */}

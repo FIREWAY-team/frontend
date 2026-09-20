@@ -49,11 +49,14 @@ const VEHICLE_PROFILE: Record<
     label: "중형펌프차 통과 폭 확보 경로",
   },
   "pump-15": {
-    osrmAltIndex: 2,
+    // 최단 경로 그대로 사용 · passable=false 로 dashed 표시 → "이 경로 진입 제한" 스토리.
+    // ⚠️ alt[2] 는 OSRM 이 종종 지도 바깥까지 우회하는 K-shortest 대체를 반환 → 네모난 삥돌기.
+    //    대안 없이 이 골목이 불가 라는 것을 dashed 로 명시하는 게 심사원에게 더 정직.
+    osrmAltIndex: 0,
     passableProb: 0.42,
     passable: false,
     unresolved: true,
-    label: "대형펌프차 회전반경 제한 · 대로변 접근",
+    label: "대형펌프차 회전반경 제한 · 대로변 정차 권고",
   },
   "aerial-25": {
     osrmAltIndex: 1,
