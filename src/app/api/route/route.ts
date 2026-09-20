@@ -17,8 +17,13 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const OSRM_URL = "https://router.project-osrm.org";
-/** BE 응답 대기 최대 시간. BE 자체 라우팅 예산 (~8s) + 오버헤드 + FE 여유. */
-const BE_MAX_WAIT_MS = 8_000;
+/**
+ * BE 응답 대기 최대 시간.
+ * ⚠️ BE `MockValhallaClient` 의 `TOTAL_BUDGET` 이 8s · 그 안에 base+via OSRM 요청을 병렬 시도.
+ *    이전엔 여기도 8s 였는데 BE 가 예산 만료 시점 근처에 응답 조립하다 우리 timeout 이 먼저
+ *    끝나 항상 beFallback 을 반환했다 (09-20 실측). BE 예산 + 네트워크·직렬화 여유 2s.
+ */
+const BE_MAX_WAIT_MS = 10_000;
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));

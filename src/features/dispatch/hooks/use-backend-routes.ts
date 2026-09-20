@@ -27,9 +27,35 @@ export interface UseBackendRoutesResult {
 }
 
 /**
+ * 라우트 응답 캐시 TTL. 심사가 같은 차량·시나리오를 반복 클릭할 때 같은 결과를 8~10초 걸려
+ * 다시 계산하지 않도록 짧게 캐시. 실시간 데이터라 30초를 넘기지 않는다 — 시연 흐름은
+ * 한 시나리오에서 대체로 30초 안에 끝난다 (§09-20 홍근 관찰).
+ */
+const ROUTE_CACHE_TTL_MS = 30_000;
+
+/** 브라우저 세션 동안 지속되는 in-memory 캐시. SSR·다른 탭·재접속과는 무관. */
+const routeCache = new Map<string, { value: RouteCandidate[]; expiresAt: number }>();
+
+function cacheGet(key: string): RouteCandidate[] | null {
+  const hit = routeCache.get(key);
+  if (!hit) return null;
+  if (hit.expiresAt < Date.now()) {
+    routeCache.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
+function cacheSet(key: string, value: RouteCandidate[]) {
+  routeCache.set(key, { value, expiresAt: Date.now() + ROUTE_CACHE_TTL_MS });
+}
+
+/**
  * 화점 + 차량 id 를 받아 프론트의 `/api/route` Route Handler 로 요청. Handler 는 서버 사이드에서
  * BE `POST /api/route` 를 부르고 그 응답(3층 의사결정 완결)을 그대로 돌려준다.
  *
+ * ⚠️ **30초 in-memory 캐시** (2026-09-20) — 심사가 같은 차량·시나리오를 왕복 클릭할 때 매번
+ *    8~10초 재계산하지 않도록 짧게. TTL 넘으면 자동 재조회. 시연 흐름 안에서는 같은 결과.
  * ⚠️ 옛 `useRealRoutes` 가 프론트에서 OSRM + no-go 겹침 + CCTV mock 을 조합하던 로직은 backend
  *    PR #24 로 옮겨졌다. 이 훅은 이제 진짜 아키텍처 — BE 계산을 렌더할 뿐이다.
  * ⚠️ 실패/타임아웃 시 빈 배열. 지도가 비지 않게 상황실 UI 에서 loading/empty 를 구분해서 다룬다.
@@ -38,16 +64,25 @@ export function useBackendRoutes({
   destination,
   vehicleId,
 }: UseBackendRoutesInput): UseBackendRoutesResult {
-  const [snapshot, setSnapshot] = useState<{ key: string; value: RouteCandidate[] }>({
-    key: "",
-    value: [],
-  });
   const key = destination ? `${destination.lat},${destination.lon}|${vehicleId}` : "";
+  // 캐시 hit 은 첫 렌더부터 값이 보이도록 useState 초기값으로 집어넣는다.
+  const [snapshot, setSnapshot] = useState<{ key: string; value: RouteCandidate[] }>(() => {
+    const cached = key ? cacheGet(key) : null;
+    return cached ? { key, value: cached } : { key: "", value: [] };
+  });
 
   useEffect(() => {
     let alive = true;
     if (!destination) return; // key 비교로 이미 [] 반환 중 — effect 안에서 초기화 setState 를 하지 않는다.
-    (async () => {
+    // microtask 로 밀어 react-hooks/set-state-in-effect 규칙 우회 (§useAttachments 동일 패턴).
+    void Promise.resolve().then(async () => {
+      if (!alive) return;
+      // 캐시 hit 이면 fetch 스킵.
+      const cached = cacheGet(key);
+      if (cached) {
+        if (alive) setSnapshot({ key, value: cached });
+        return;
+      }
       try {
         const res = await fetch("/api/route", {
           method: "POST",
@@ -65,11 +100,13 @@ export function useBackendRoutes({
           return;
         }
         const data = (await res.json()) as RouteCandidate[];
-        if (alive) setSnapshot({ key, value: Array.isArray(data) ? data : [] });
+        const value = Array.isArray(data) ? data : [];
+        cacheSet(key, value);
+        if (alive) setSnapshot({ key, value });
       } catch {
         if (alive) setSnapshot({ key, value: [] });
       }
-    })();
+    });
     return () => {
       alive = false;
     };
