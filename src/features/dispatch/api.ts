@@ -77,7 +77,7 @@ export async function fetchRoutes(input: RoutePlanInput): Promise<RouteCandidate
 
 export async function fetchRoutePlan(input: RoutePlanInput): Promise<LiveRouteResult> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20_000);
+  const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
     const res = await fetch(`${BACKEND_API_URL}/api/route`, {
       method: "POST",
