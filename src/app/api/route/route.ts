@@ -77,6 +77,8 @@ export async function POST(request: Request) {
   const to = body.to;
   const k = typeof body.k === "number" ? body.k : 3;
   const vehicleId = String(body.vehicleId ?? body.vehicle_id ?? "pump-3.5");
+  // 상황실 데모 · mode="shortest" 는 via 웨이포인트·차량 프로파일 데코 건너뛰고 순수 OSRM 최단.
+  const shortest = body.mode === "shortest";
 
   const beFallback = details
     ? { routes: [] as RouteCandidate[], assessments: [] as unknown[], warnings: [] as string[] }
@@ -91,14 +93,14 @@ export async function POST(request: Request) {
       }).catch(() => beFallback),
       new Promise((resolve) => setTimeout(() => resolve(beFallback), BE_MAX_WAIT_MS)),
     ]) as Promise<typeof beFallback>,
-    fetchOsrmRoutes(from, to, k, vehicleId).catch((err) => {
+    fetchOsrmRoutes(from, to, k, vehicleId, shortest).catch((err) => {
       console.warn(`[route:osrm] ${err instanceof Error ? err.message : String(err)}`);
       return [] as RouteCandidate[];
     }),
     details ? fetchCctvMarkers() : Promise.resolve([]),
   ]);
 
-  const osrmRoutes = decorateFallbackRoutes(rawOsrmRoutes, vehicleId);
+  const osrmRoutes = shortest ? rawOsrmRoutes : decorateFallbackRoutes(rawOsrmRoutes, vehicleId);
 
   const beRoutes: RouteCandidate[] = details
     ? ((beResult as { routes: RouteCandidate[] }).routes ?? [])
@@ -147,12 +149,14 @@ async function fetchOsrmRoutes(
   to: { lat: number; lon: number },
   k: number,
   vehicleId: string,
+  shortest = false,
 ): Promise<RouteCandidate[]> {
   if (!from || !to || typeof from.lat !== "number" || typeof to.lat !== "number") return [];
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
   try {
-    const via = VEHICLE_ROUTE_PROFILE[vehicleId]?.via;
+    // shortest 모드는 via 를 아예 안 씀 → 순수 최단 경로 (상황실 데모).
+    const via = shortest ? undefined : VEHICLE_ROUTE_PROFILE[vehicleId]?.via;
     const points = [
       `${from.lon},${from.lat}`,
       ...(via ? [`${via[0]},${via[1]}`] : []),

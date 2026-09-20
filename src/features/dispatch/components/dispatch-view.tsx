@@ -72,17 +72,22 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
   // BE 가 3층 의사결정(정적 no-go × CCTV verdict × 차량 폭)을 이미 매겨서 내려준다 (§backend PR #24).
   // 프론트는 렌더만. 옛 프론트-계산 훅(use-real-routes / use-osrm-enrich) 은 backend PR #24 로 함께 걷혔다.
   // 라이브 시연과 동일: 소형/중형/대형 3 차량을 병렬 조회해 지도에 동시에 표시한다.
+  // 상황실 데모 · 3 차량 모두 mode="shortest" → via 없는 OSRM 최단 경로 하나로 통일.
+  // 3 라인이 같은 경로 위에 겹쳐 그려지므로 선택된 차량 색이 위에 보이도록 렌더 순서 조정.
   const smallRoutes = useBackendRoutes({
     destination: scenario ? scenario.location : null,
     vehicleId: "pump-3.5",
+    mode: "shortest",
   });
   const mediumRoutes = useBackendRoutes({
     destination: scenario ? scenario.location : null,
     vehicleId: "pump-8",
+    mode: "shortest",
   });
   const largeRoutes = useBackendRoutes({
     destination: scenario ? scenario.location : null,
     vehicleId: "pump-15",
+    mode: "shortest",
   });
   const routeQueries: Record<string, { routes: RouteCandidate[]; loading: boolean }> = {
     "pump-3.5": smallRoutes,
@@ -237,20 +242,25 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
                 title={scenario.title}
               />
             )}
-            {/* 3 차량 최적 경로를 한꺼번에 렌더 — 선택된 차량은 굵고 진하게, 나머지는 얇게. */}
-            {vehicleBestRoutes.map(({ vehicle: routeVehicle, route }) => {
-              const isActive = routeVehicle.id === activeVehicleId;
-              return (
-                <Polyline
-                  key={routeVehicle.id}
-                  path={toKakaoPath(route.coordinates)}
-                  strokeWeight={isActive ? 7 : 4}
-                  strokeColor={vehicleRouteColor(routeVehicle.id)}
-                  strokeOpacity={isActive ? 0.95 : 0.55}
-                  strokeStyle={route.passableForVehicle === false ? "shortdash" : "solid"}
-                />
-              );
-            })}
+            {/* 3 차량 최단 경로가 같은 좌표 위에 겹쳐 그려짐. 활성 차량이 맨 위에 오도록 정렬 후 렌더. */}
+            {[...vehicleBestRoutes]
+              .sort((a, b) => {
+                const aActive = a.vehicle.id === activeVehicleId ? 1 : 0;
+                const bActive = b.vehicle.id === activeVehicleId ? 1 : 0;
+                return aActive - bActive;
+              })
+              .map(({ vehicle: routeVehicle, route }) => {
+                const isActive = routeVehicle.id === activeVehicleId;
+                return (
+                  <Polyline
+                    key={routeVehicle.id}
+                    path={toKakaoPath(route.coordinates)}
+                    strokeWeight={isActive ? 7 : 4}
+                    strokeColor={vehicleRouteColor(routeVehicle.id)}
+                    strokeOpacity={isActive ? 0.95 : 0.55}
+                  />
+                );
+              })}
           </KakaoCanvas>
 
           {scenario && <IntakeOverlay scenario={scenario} />}
