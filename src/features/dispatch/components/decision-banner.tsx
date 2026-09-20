@@ -9,6 +9,8 @@ import type { RouteCandidate } from "../types";
 
 interface DecisionBannerProps {
   decision: RouteCandidate | null;
+  /** 서버 계산 중 · empty state 대신 스켈레톤 톤으로 안내한다. */
+  loading?: boolean;
   vehicleName?: string;
   onOpenEvidence: () => void;
 }
@@ -26,7 +28,24 @@ interface DecisionBannerProps {
  * ⚠️ **fade-in 진입** (§design-lab guide 4.7 · motion motivated) — 시나리오가 바뀌면
  *    새 결정이 들어왔다는 시각 신호를 fade 로만 준다. 큰 애니메이션 금지.
  */
-export function DecisionBanner({ decision, vehicleName, onOpenEvidence }: DecisionBannerProps) {
+export function DecisionBanner({
+  decision,
+  loading,
+  vehicleName,
+  onOpenEvidence,
+}: DecisionBannerProps) {
+  if (loading) {
+    return (
+      <div
+        className="border-border bg-surface flex items-center justify-center gap-2 rounded-md border px-4 py-6"
+        role="status"
+        aria-live="polite"
+      >
+        <span className="border-muted-foreground/30 border-t-primary inline-block h-3 w-3 animate-spin rounded-full border-2" />
+        <span className="text-muted-foreground text-[12px]">경로를 계산하고 있습니다…</span>
+      </div>
+    );
+  }
   if (!decision || decision.passableForVehicle !== true || decision.hasUnresolvedStaticNoGo) {
     return (
       <div className="border-border bg-surface flex items-center justify-center rounded-md border px-4 py-6">

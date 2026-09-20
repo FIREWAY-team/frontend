@@ -38,7 +38,10 @@ const ROUTE_COLORS = ["#6B9BD1", "#f59e0b", "#10b981"];
  *    지금 후보 카드·순위 스왑 UX는 **팀장 답변 대기** — 답 오면 화면 재구성.
  */
 export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // ⚠️ 초기 접속 즉시 첫 시나리오 자동 선택. 심사원이 "확정 가능한 경로가 없습니다" 를 먼저 보면
+  //    시스템이 꺼진 것처럼 읽힌다 (§09-20 URL 심사 대응). 사용자가 직접 다른 시나리오를 눌러
+  //    바꾸면 그 선택이 유지된다.
+  const [selectedId, setSelectedId] = useState<string | null>(scenarios[0]?.id ?? null);
   const [previewingRank, setPreviewingRank] = useState<number | null>(null);
   const [decisionRank, setDecisionRank] = useState<number>(1);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
@@ -55,7 +58,7 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
 
   // BE 가 3층 의사결정(정적 no-go × CCTV verdict × 차량 폭)을 이미 매겨서 내려준다 (§backend PR #24).
   // 프론트는 렌더만. 옛 프론트-계산 훅(use-real-routes / use-osrm-enrich) 은 backend PR #24 로 함께 걷혔다.
-  const routes = useBackendRoutes({
+  const { routes, loading } = useBackendRoutes({
     destination: scenario ? scenario.location : null,
     vehicleId: activeVehicleId,
   });
@@ -130,6 +133,7 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
         )}
         <DecisionBanner
           decision={decision}
+          loading={loading}
           vehicleName={vehicle?.name}
           onOpenEvidence={() => setEvidenceOpen(true)}
         />
