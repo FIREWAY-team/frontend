@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { fetchCctvMarkers } from "@/features/cctv/api";
 import { fetchRoutePlan, fetchRoutes } from "@/features/dispatch/api";
-import type { RouteCandidate } from "@/features/dispatch/types";
+import type { ExcludedReason, RouteCandidate } from "@/features/dispatch/types";
 
 /**
  * `/api/route` — 브라우저 fetch 프록시.
@@ -19,17 +19,34 @@ export const revalidate = 0;
 
 const OSRM_URL = "https://router.project-osrm.org";
 
-const VEHICLE_ROUTE_PROFILE: Record<
-  string,
-  {
-    via: [number, number];
-    passableProb: number;
-    passable: boolean;
-    unresolved: boolean;
-    cctvIds: string[];
-    label: string;
-  }
-> = {
+/**
+ * 차량별 시연 경로 프로파일.
+ *
+ * ⚠️ **여기 값은 BE 3층 판단이 아니라 시연용 데코레이션이다.** BE 가 BE_MAX_WAIT_MS 안에
+ *    응답하면 BE 값이 쓰이고, 늦으면 OSRM 경로 위에 이 프로파일이 덧씌워진다.
+ *
+ * ⚠️ 2026-09-20 정정 — pump-15 가 `passable: false` · "회전반경 제한" 으로 박혀 있었다.
+ *    (1) 회전반경은 BE 가 판단에 쓰지 않는다. 판단 축은 정적 진입곤란 × CCTV 판정 × **폭**
+ *        셋뿐이고 `turning_radius_m` 은 DTO 밖에서 참조되지 않는다. 화면에만 있던 근거였다.
+ *    (2) CCTV 판정표(V5_3 · 유강현 확정)에서 pump-15 는 a1 · a17 · a41 · a49 네 곳이 PASS 다.
+ *        via 로 쓰는 a49 도 그중 하나인데 통행 불가로 표시하고 있었다.
+ *    판정표와 일치시키고 근거 없는 제약 문구는 뺀다.
+ *
+ * 타입이 "막혔다는데 이유가 없는" 상태를 금지한다 — passable: false 면 excluded 가 필수다.
+ * 라이브에서 `passableForVehicle: false` 인데 `excludedReasons: []` 로 나가 화면이 이유를
+ * 못 보여주던 것이 정확히 이 조합이었다.
+ */
+type VehicleRouteProfile = {
+  via: [number, number];
+  passableProb: number;
+  cctvIds: string[];
+  label: string;
+} & (
+  | { passable: true; unresolved: false; excluded?: never }
+  | { passable: false; unresolved: boolean; excluded: ExcludedReason[] }
+);
+
+const VEHICLE_ROUTE_PROFILE: Record<string, VehicleRouteProfile> = {
   "pump-3.5": {
     via: [127.127691, 37.430907],
     passableProb: 0.94,
@@ -47,12 +64,20 @@ const VEHICLE_ROUTE_PROFILE: Record<
     label: "중형펌프차 통과 폭 확보 경로",
   },
   "pump-15": {
-    via: [127.129123, 37.43026],
-    passableProb: 0.38,
-    passable: false,
-    unresolved: true,
-    cctvIds: ["cctv_moran_a49"],
-    label: "대형펌프차 회전반경 제한 · 대로변 접근",
+    // cctv_moran_a41 (37.4314, 127.12819) · pump-15 PASS 판정 지점이다.
+    //
+    // a49 에서 옮겼다. a49 는 목적지보다 238m 남쪽이라 경로가 목적지를 지나쳤다 되돌아왔고
+    // 지도에서 꺾여 보였다(§09-20 라이브 브리핑 지적). a41 은 111m 로 절반 이하고 거리도
+    // 2218m -> 2140m 로 짧다. a1(2074m)이 가장 짧지만 pump-8·aerial-25 가 이미 써서
+    // 차종별로 다른 경로가 나오는 시연이 죽는다.
+    via: [127.12819, 37.4314],
+    // pump-8(0.78)보다 낮게 둔다 — 폭 2.9m 라 통과 판정 골목이 더 적다(a21 은 UNCERTAIN).
+    passableProb: 0.74,
+    passable: true,
+    unresolved: false,
+    // via 가 a41 이므로 이 경로가 실제로 지나는 PASS 지점만 적는다. 안 지나는 곳은 넣지 않는다.
+    cctvIds: ["cctv_moran_a41"],
+    label: "대형펌프차 통과 골목 우회 · CCTV 판정 근거",
   },
   "aerial-25": {
     via: [127.128116, 37.431987],
@@ -63,6 +88,7 @@ const VEHICLE_ROUTE_PROFILE: Record<
     label: "굴절차 통과 폭 확보 경로",
   },
 };
+
 /**
  * BE 응답 대기 최대 시간.
  * 지연 시 차량별 CCTV+OSRM 시연 경로가 완전한 폴백을 제공하므로 라이브 브리핑을
@@ -214,6 +240,9 @@ function decorateFallbackRoutes(routes: RouteCandidate[], vehicleId: string): Ro
     unlockedByCctv: profile.cctvIds,
     hasUnresolvedStaticNoGo: profile.unresolved,
     explanation: `${profile.label} · ${route.explanation}`,
+    // 통행 불가로 표시하면 막은 구간을 반드시 같이 내려준다. 근거 없는 "불가" 는 화면에서
+    // 이유를 못 보여준다 — 타입이 이미 막지만 응답까지 이어져야 의미가 있다.
+    excludedReasons: profile.passable ? [] : profile.excluded,
   }));
 }
 
