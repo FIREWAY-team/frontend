@@ -31,11 +31,11 @@ const VEHICLE_ROUTE_PROFILE: Record<
   }
 > = {
   "pump-3.5": {
-    via: [127.12609, 37.43159],
+    via: [127.127691, 37.430907],
     passableProb: 0.94,
     passable: true,
     unresolved: false,
-    cctvIds: ["cctv_moran_a34", "cctv_moran_a41"],
+    cctvIds: ["cctv_moran_a21", "cctv_moran_a34"],
     label: "소형펌프차 통과 골목 우선",
   },
   "pump-8": {
