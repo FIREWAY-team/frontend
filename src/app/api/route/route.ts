@@ -65,10 +65,12 @@ const VEHICLE_ROUTE_PROFILE: Record<
 };
 /**
  * BE 응답 대기 최대 시간.
- * 지연 시 차량별 CCTV+OSRM 시연 경로가 완전한 폴백을 제공하므로 라이브 브리핑을
- * 10초씩 멈추지 않는다.
+ * ⚠️ 2026-09-20: 4s 는 BE (MockValhallaClient · public OSRM 3콜 · 8s 예산) 를 매번 앞질러
+ *    폴백만 반환 → 대형 pump-15 hardcoded via 로 남쪽 삥돌기 · CCTV verdict 차량 미변동 을
+ *    유발했다. 10s 로 늘려 BE 3층 결정을 기다린다. BE 살아있으면 2~3s, OSRM 지연 시 8s.
+ *    BE 자체가 죽었을 땐 여전히 폴백 (Promise.race + fetchRoutePlan catch → beFallback).
  */
-const BE_MAX_WAIT_MS = 4_000;
+const BE_MAX_WAIT_MS = 10_000;
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
