@@ -22,6 +22,12 @@ interface KakaoCanvasProps {
    *    호출부는 debounce 를 걸어 폭주 방지 (§CLAUDE.md `bbox` 250ms 규칙).
    */
   onBoundsChange?: (bbox: [number, number, number, number]) => void;
+  /**
+   * 지도 인스턴스 준비 완료 시 호출. `map.setBounds(...)` 처럼 명령형 API 가 필요할 때만 잡는다.
+   * ⚠️ 이 콜백을 훅 안에 만들면 map 이 바뀔 때마다 새로 붙어 첫 프레임에 안 잡힐 수 있다 —
+   *    `useCallback` 으로 감싸 안정된 참조로 넘겨야 한다.
+   */
+  onMapCreate?: (map: kakao.maps.Map) => void;
 }
 
 /**
@@ -42,6 +48,7 @@ export function KakaoCanvas({
   children,
   overlayLabel,
   onBoundsChange,
+  onMapCreate,
 }: KakaoCanvasProps) {
   const configured = isKakaoMapConfigured();
 
@@ -98,6 +105,7 @@ export function KakaoCanvas({
         level={level}
         className="h-full w-full"
         style={{ width: "100%", height: "100%" }}
+        onCreate={onMapCreate}
         onBoundsChanged={
           onBoundsChange
             ? (map) => {
