@@ -70,7 +70,7 @@ const VEHICLE_ROUTE_PROFILE: Record<
  *    유발했다. 10s 로 늘려 BE 3층 결정을 기다린다. BE 살아있으면 2~3s, OSRM 지연 시 8s.
  *    BE 자체가 죽었을 땐 여전히 폴백 (Promise.race + fetchRoutePlan catch → beFallback).
  */
-const BE_MAX_WAIT_MS = 10_000;
+const BE_MAX_WAIT_MS = 18_000;
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
