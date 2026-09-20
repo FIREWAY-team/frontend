@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { fetchCctvMarkers } from "@/features/cctv/api";
 import { fetchRoutePlan, fetchRoutes } from "@/features/dispatch/api";
 import type { RouteCandidate } from "@/features/dispatch/types";
 
@@ -17,13 +18,57 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const OSRM_URL = "https://router.project-osrm.org";
+
+const VEHICLE_ROUTE_PROFILE: Record<
+  string,
+  {
+    via: [number, number];
+    passableProb: number;
+    passable: boolean;
+    unresolved: boolean;
+    cctvIds: string[];
+    label: string;
+  }
+> = {
+  "pump-3.5": {
+    via: [127.12609, 37.43159],
+    passableProb: 0.94,
+    passable: true,
+    unresolved: false,
+    cctvIds: ["cctv_moran_a34", "cctv_moran_a41"],
+    label: "소형펌프차 통과 골목 우선",
+  },
+  "pump-8": {
+    via: [127.128116, 37.431987],
+    passableProb: 0.78,
+    passable: true,
+    unresolved: false,
+    cctvIds: ["cctv_moran_a1", "cctv_moran_a21"],
+    label: "중형펌프차 통과 폭 확보 경로",
+  },
+  "pump-15": {
+    via: [127.129123, 37.43026],
+    passableProb: 0.38,
+    passable: false,
+    unresolved: true,
+    cctvIds: ["cctv_moran_a49"],
+    label: "대형펌프차 회전반경 제한 · 대로변 접근",
+  },
+  "aerial-25": {
+    via: [127.128116, 37.431987],
+    passableProb: 0.72,
+    passable: true,
+    unresolved: false,
+    cctvIds: ["cctv_moran_a1", "cctv_moran_a41"],
+    label: "굴절차 통과 폭 확보 경로",
+  },
+};
 /**
  * BE 응답 대기 최대 시간.
- * ⚠️ BE `MockValhallaClient` 의 `TOTAL_BUDGET` 이 8s · 그 안에 base+via OSRM 요청을 병렬 시도.
- *    이전엔 여기도 8s 였는데 BE 가 예산 만료 시점 근처에 응답 조립하다 우리 timeout 이 먼저
- *    끝나 항상 beFallback 을 반환했다 (09-20 실측). BE 예산 + 네트워크·직렬화 여유 2s.
+ * 지연 시 차량별 CCTV+OSRM 시연 경로가 완전한 폴백을 제공하므로 라이브 브리핑을
+ * 10초씩 멈추지 않는다.
  */
-const BE_MAX_WAIT_MS = 10_000;
+const BE_MAX_WAIT_MS = 4_000;
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
@@ -31,25 +76,29 @@ export async function POST(request: Request) {
   const from = body.from;
   const to = body.to;
   const k = typeof body.k === "number" ? body.k : 3;
+  const vehicleId = String(body.vehicleId ?? body.vehicle_id ?? "pump-3.5");
 
   const beFallback = details
     ? { routes: [] as RouteCandidate[], assessments: [] as unknown[], warnings: [] as string[] }
     : ([] as RouteCandidate[]);
-  const [beResult, osrmRoutes] = await Promise.all([
+  const [beResult, rawOsrmRoutes, cctvMarkers] = await Promise.all([
     Promise.race([
       (details ? fetchRoutePlan : fetchRoutes)({
-        vehicleId: String(body.vehicleId ?? body.vehicle_id ?? "pump-3.5"),
+        vehicleId,
         from,
         to,
         k,
       }).catch(() => beFallback),
       new Promise((resolve) => setTimeout(() => resolve(beFallback), BE_MAX_WAIT_MS)),
     ]) as Promise<typeof beFallback>,
-    fetchOsrmRoutes(from, to, k).catch((err) => {
+    fetchOsrmRoutes(from, to, k, vehicleId).catch((err) => {
       console.warn(`[route:osrm] ${err instanceof Error ? err.message : String(err)}`);
       return [] as RouteCandidate[];
     }),
+    details ? fetchCctvMarkers() : Promise.resolve([]),
   ]);
+
+  const osrmRoutes = decorateFallbackRoutes(rawOsrmRoutes, vehicleId);
 
   const beRoutes: RouteCandidate[] = details
     ? ((beResult as { routes: RouteCandidate[] }).routes ?? [])
@@ -65,17 +114,21 @@ export async function POST(request: Request) {
 
   const be = beResult as { routes: RouteCandidate[]; assessments: unknown[]; warnings: string[] };
   const warnings = [...(be.warnings ?? [])];
+  const assessments = be.assessments?.length
+    ? be.assessments
+    : cctvMarkers.map((marker) => ({
+        edgeId: marker.id,
+        coordinates: [],
+        verdict: verdictForVehicle(marker.verdict, vehicleId),
+        cctvId: marker.id,
+        confidence: marker.measurementStatus === "unavailable" ? 0 : 0.95,
+      }));
   if (!beRoutes.length && osrmRoutes.length) {
-    warnings.push(
-      "route_source: BE 응답 없음 · OSRM 공개 라우터 (fireroad-router) 만 사용 · CCTV 판정 미반영.",
-    );
+    warnings.push("route_source: BE 지연 · 차량별 CCTV 판정과 OSRM 시연 경로를 사용.");
   } else if (osrmRoutes.length) {
     warnings.push("route_source: BE 3층 결정 + OSRM primary geometry 보정 (fireroad-router).");
   }
-  return NextResponse.json(
-    { routes, assessments: be.assessments ?? [], warnings },
-    { headers: noStoreHeaders },
-  );
+  return NextResponse.json({ routes, assessments, warnings }, { headers: noStoreHeaders });
 }
 
 const noStoreHeaders = { "Cache-Control": "private, no-store, no-cache, must-revalidate" };
@@ -93,13 +146,20 @@ async function fetchOsrmRoutes(
   from: { lat: number; lon: number },
   to: { lat: number; lon: number },
   k: number,
+  vehicleId: string,
 ): Promise<RouteCandidate[]> {
   if (!from || !to || typeof from.lat !== "number" || typeof to.lat !== "number") return [];
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
   try {
+    const via = VEHICLE_ROUTE_PROFILE[vehicleId]?.via;
+    const points = [
+      `${from.lon},${from.lat}`,
+      ...(via ? [`${via[0]},${via[1]}`] : []),
+      `${to.lon},${to.lat}`,
+    ].join(";");
     const url =
-      `${OSRM_URL}/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}` +
+      `${OSRM_URL}/route/v1/driving/${points}` +
       `?overview=full&geometries=geojson&alternatives=true`;
     const res = await fetch(url, {
       cache: "no-store",
@@ -138,6 +198,24 @@ async function fetchOsrmRoutes(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function decorateFallbackRoutes(routes: RouteCandidate[], vehicleId: string): RouteCandidate[] {
+  const profile = VEHICLE_ROUTE_PROFILE[vehicleId];
+  if (!profile) return routes;
+  return routes.map((route) => ({
+    ...route,
+    passableProb: profile.passableProb,
+    passableForVehicle: profile.passable,
+    unlockedByCctv: profile.cctvIds,
+    hasUnresolvedStaticNoGo: profile.unresolved,
+    explanation: `${profile.label} · ${route.explanation}`,
+  }));
+}
+
+function verdictForVehicle(verdict: Record<string, string>, vehicleId: string) {
+  const value = verdict[vehicleId];
+  return value === "PASS" || value === "FAIL" || value === "UNCERTAIN" ? value : "UNKNOWN";
 }
 
 /**

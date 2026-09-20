@@ -125,24 +125,27 @@ export function LiveCctvLayer({ vehicleId }: { vehicleId: string }) {
 
   return (
     <>
-      {markers.map((m) => (
-        <CustomOverlayMap
-          key={m.id}
-          position={{ lat: m.lat, lng: m.lon }}
-          yAnchor={0.5}
-          xAnchor={0.5}
-        >
-          <button
-            type="button"
-            onClick={() => openPopup(m.id)}
-            aria-label={`CCTV ${m.id} · ${m.status}`}
-            className="grid h-6 w-6 place-items-center rounded-full border-2 border-white shadow-md ring-1 ring-black/20 transition-transform hover:scale-110"
-            style={{ backgroundColor: markerColor(m.status) }}
+      {markers.map((m) => {
+        const status = vehicleVerdict(m, vehicleId);
+        return (
+          <CustomOverlayMap
+            key={m.id}
+            position={{ lat: m.lat, lng: m.lon }}
+            yAnchor={0.5}
+            xAnchor={0.5}
           >
-            <span className="text-[9px] font-bold text-white drop-shadow">{shortId(m.id)}</span>
-          </button>
-        </CustomOverlayMap>
-      ))}
+            <button
+              type="button"
+              onClick={() => openPopup(m.id)}
+              aria-label={`CCTV ${m.id} · ${status}`}
+              className="grid h-6 w-6 place-items-center rounded-full border-2 border-white shadow-md ring-1 ring-black/20 transition-transform hover:scale-110"
+              style={{ backgroundColor: markerColor(status) }}
+            >
+              <span className="text-[9px] font-bold text-white drop-shadow">{shortId(m.id)}</span>
+            </button>
+          </CustomOverlayMap>
+        );
+      })}
 
       {selected && selected.reading && (
         <CustomOverlayMap
@@ -186,6 +189,11 @@ function markerColor(s: VerdictStatus): string {
   if (s === "FAIL") return "#ef4444";
   if (s === "UNCERTAIN") return "#eab308";
   return "#9ca3af";
+}
+
+function vehicleVerdict(marker: CctvMarker, vehicleId: string): VerdictStatus {
+  const verdict = marker.verdict[vehicleId];
+  return verdict === "PASS" || verdict === "FAIL" || verdict === "UNCERTAIN" ? verdict : "UNKNOWN";
 }
 
 /** cctv_id 뒤 3자 (예: "moran-a41" → "A41"). 시연 마커 라벨. */
