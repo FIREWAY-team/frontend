@@ -29,20 +29,18 @@ export function RetryTicker() {
   }, [seconds, router]);
 
   return (
-    <div className="flex flex-wrap items-center gap-3">
+    <div className="flex flex-col items-center gap-3">
       <Link
         href="/dispatch"
-        className="group bg-foreground text-background hover:bg-foreground/90 focus-visible:ring-ring focus-visible:ring-offset-background flex h-11 items-center gap-2 rounded-lg px-5 text-[13px] font-semibold shadow-lg transition-all hover:shadow-xl focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+        className="group bg-foreground text-background hover:bg-foreground/90 focus-visible:ring-ring focus-visible:ring-offset-background inline-flex h-11 items-center gap-1.5 rounded-md px-5 text-[13px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
       >
         지금 상황실로 이동
-        <ArrowRight size={14} className="transition-transform group-hover:translate-x-0.5" />
+        <ArrowRight size={14} strokeWidth={2} />
       </Link>
-      <div className="border-border text-muted-foreground flex h-11 items-center gap-2 rounded-lg border px-4 text-[12.5px]">
-        <RotateCw size={12} strokeWidth={2} aria-hidden className="animate-spin" />
-        <span>
-          <span className="tabular text-foreground font-medium">{seconds}</span>초 후 자동 재시도
-        </span>
-      </div>
+      <p className="text-muted-foreground/80 flex items-center gap-1.5 text-[11.5px]">
+        <RotateCw size={11} strokeWidth={2} aria-hidden className="animate-spin" />
+        <span className="tabular-nums">{seconds}</span>초 후 자동 재시도
+      </p>
     </div>
   );
 }
