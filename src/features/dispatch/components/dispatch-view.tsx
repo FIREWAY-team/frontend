@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MapMarker, Polyline } from "react-kakao-maps-sdk";
 
 import { KakaoCanvas } from "@/components/map/kakao-canvas";
@@ -28,6 +28,14 @@ const DEFAULT_CENTER = { lat: 37.432, lon: 127.145 };
  * ⚠️ CandidateCard 배지 색과 맞추면 사용자가 카드-지도 대응을 눈으로 잇는다.
  */
 const ROUTE_COLORS = ["#6B9BD1", "#f59e0b", "#10b981"];
+
+/**
+ * `map.setBounds` 여백 (Kakao 순서 · top·right·bottom·left · px).
+ * ⚠️ IntakeOverlay 카드가 우하단 `right-3 bottom-3 w-72` (~288px 폭 · ~200px 높이) 로 절대 배치.
+ *    그 카드가 도착 마커를 가리지 않도록 right/bottom 여유. DecisionBanner 는 지도 위가 아니라
+ *    그 위쪽 형제 요소라 top 은 얇게.
+ */
+const BOUNDS_PADDING = { top: 40, right: 340, bottom: 220, left: 40 } as const;
 
 /**
  * `/dispatch` 화면 클라이언트 오케스트레이터.
@@ -71,6 +79,37 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
   const candidates = routes.filter((r) => r.rank !== decision?.rank);
 
   const center = scenario ? scenario.location : DEFAULT_CENTER;
+
+  const mapRef = useRef<kakao.maps.Map | null>(null);
+  const handleMapCreate = useCallback((map: kakao.maps.Map) => {
+    mapRef.current = map;
+  }, []);
+
+  /**
+   * 결정 경로 좌표 + 소방서 + 화점 을 감싸는 bounds 로 자동 fit.
+   * ⚠️ 09-20 종준님 진단 — 기본 zoom level 이 너무 좁아 경로가 뷰포트 밖으로 벗어남.
+   *    폴리라인은 정상 렌더링됨 · 축소하면 보임. bounds 로 자동 fit 이 근본 해결.
+   * ⚠️ 좌표는 `[lon, lat]` (GeoJSON) 순서 · `LatLng(lat, lng)` 로 뒤집는다.
+   * ⚠️ IntakeOverlay (우하단) 가 도착 마커를 가리지 않도록 right/bottom 여유 패딩.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !scenario || !decision || decision.coordinates.length === 0) return;
+    if (typeof window === "undefined" || !window.kakao?.maps) return;
+    const bounds = new window.kakao.maps.LatLngBounds();
+    bounds.extend(new window.kakao.maps.LatLng(FIRE_STATION.lat, FIRE_STATION.lon));
+    bounds.extend(new window.kakao.maps.LatLng(scenario.location.lat, scenario.location.lon));
+    for (const [lon, lat] of decision.coordinates) {
+      bounds.extend(new window.kakao.maps.LatLng(lat, lon));
+    }
+    map.setBounds(
+      bounds,
+      BOUNDS_PADDING.top,
+      BOUNDS_PADDING.right,
+      BOUNDS_PADDING.bottom,
+      BOUNDS_PADDING.left,
+    );
+  }, [scenario, decision]);
 
   function handleSelect(id: string) {
     setSelectedId(id);
@@ -139,7 +178,7 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
         />
 
         <div className="relative flex min-h-0 flex-1 flex-col">
-          <KakaoCanvas center={center} level={scenario ? 5 : 6}>
+          <KakaoCanvas center={center} level={scenario ? 5 : 6} onMapCreate={handleMapCreate}>
             {/* 소방서(출발점) — 시나리오가 선택된 순간부터 항상 표시해서 파란 경로의 시작점이
                 시각적으로 확인되게 한다. 실서비스에서는 화점에 가장 가까운 관할 소방서를 BE 가 선택. */}
             {scenario && (
