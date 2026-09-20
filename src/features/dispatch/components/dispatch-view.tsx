@@ -24,10 +24,15 @@ interface DispatchViewProps {
 const DEFAULT_CENTER = { lat: 37.432, lon: 127.145 };
 
 /**
- * 경로 순위별 색. rank 1 = 결정(파랑), 2 = 주황, 3 = 초록, 그 이하 = 회색 폴백.
- * ⚠️ CandidateCard 배지 색과 맞추면 사용자가 카드-지도 대응을 눈으로 잇는다.
+ * 차량별 지도 색 — 라이브 시연과 동일 팔레트. 소형=파랑, 중형=주황, 대형=빨강.
+ * 지도에 3 차량 최적 경로를 한꺼번에 그려서 심사원이 "차량마다 다른 경로" 를 즉시 본다.
  */
-const ROUTE_COLORS = ["#6B9BD1", "#f59e0b", "#10b981"];
+function vehicleRouteColor(vehicleId: string) {
+  if (vehicleId === "pump-3.5") return "#2563eb";
+  if (vehicleId === "pump-8") return "#f59e0b";
+  if (vehicleId === "pump-15") return "#dc2626";
+  return "#94a3b8";
+}
 
 /**
  * `map.setBounds` 여백 (Kakao 순서 · top·right·bottom·left · px).
@@ -66,10 +71,38 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
 
   // BE 가 3층 의사결정(정적 no-go × CCTV verdict × 차량 폭)을 이미 매겨서 내려준다 (§backend PR #24).
   // 프론트는 렌더만. 옛 프론트-계산 훅(use-real-routes / use-osrm-enrich) 은 backend PR #24 로 함께 걷혔다.
-  const { routes, loading } = useBackendRoutes({
+  // 라이브 시연과 동일: 소형/중형/대형 3 차량을 병렬 조회해 지도에 동시에 표시한다.
+  const smallRoutes = useBackendRoutes({
     destination: scenario ? scenario.location : null,
-    vehicleId: activeVehicleId,
+    vehicleId: "pump-3.5",
   });
+  const mediumRoutes = useBackendRoutes({
+    destination: scenario ? scenario.location : null,
+    vehicleId: "pump-8",
+  });
+  const largeRoutes = useBackendRoutes({
+    destination: scenario ? scenario.location : null,
+    vehicleId: "pump-15",
+  });
+  const routeQueries: Record<string, { routes: RouteCandidate[]; loading: boolean }> = {
+    "pump-3.5": smallRoutes,
+    "pump-8": mediumRoutes,
+    "pump-15": largeRoutes,
+  };
+  const selectedQuery = routeQueries[activeVehicleId] ?? smallRoutes;
+  const routes = selectedQuery.routes;
+  const loading = [smallRoutes, mediumRoutes, largeRoutes].some((q) => q.loading);
+  const vehicleBestRoutes = vehicles
+    .map((v) => {
+      const q = routeQueries[v.id];
+      if (!q) return null;
+      const best =
+        q.routes.find((r) => r.passableForVehicle === true && !r.hasUnresolvedStaticNoGo) ??
+        q.routes[0] ??
+        null;
+      return best ? { vehicle: v, route: best } : null;
+    })
+    .filter((v): v is { vehicle: Vehicle; route: RouteCandidate } => v !== null);
   const decision: RouteCandidate | null =
     routes.find(
       (r) => r.rank === decisionRank && r.passableForVehicle === true && !r.hasUnresolvedStaticNoGo,
@@ -86,7 +119,7 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
   }, []);
 
   /**
-   * 결정 경로 좌표 + 소방서 + 화점 을 감싸는 bounds 로 자동 fit.
+   * 3 차량 경로 + 소방서 + 화점 을 감싸는 bounds 로 자동 fit.
    * ⚠️ 09-20 종준님 진단 — 기본 zoom level 이 너무 좁아 경로가 뷰포트 밖으로 벗어남.
    *    폴리라인은 정상 렌더링됨 · 축소하면 보임. bounds 로 자동 fit 이 근본 해결.
    * ⚠️ 좌표는 `[lon, lat]` (GeoJSON) 순서 · `LatLng(lat, lng)` 로 뒤집는다.
@@ -94,13 +127,15 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
    */
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !scenario || !decision || decision.coordinates.length === 0) return;
+    if (!map || !scenario || vehicleBestRoutes.length === 0) return;
     if (typeof window === "undefined" || !window.kakao?.maps) return;
     const bounds = new window.kakao.maps.LatLngBounds();
     bounds.extend(new window.kakao.maps.LatLng(FIRE_STATION.lat, FIRE_STATION.lon));
     bounds.extend(new window.kakao.maps.LatLng(scenario.location.lat, scenario.location.lon));
-    for (const [lon, lat] of decision.coordinates) {
-      bounds.extend(new window.kakao.maps.LatLng(lat, lon));
+    for (const { route } of vehicleBestRoutes) {
+      for (const [lon, lat] of route.coordinates) {
+        bounds.extend(new window.kakao.maps.LatLng(lat, lon));
+      }
     }
     map.setBounds(
       bounds,
@@ -109,7 +144,7 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
       BOUNDS_PADDING.bottom,
       BOUNDS_PADDING.left,
     );
-  }, [scenario, decision]);
+  }, [scenario, vehicleBestRoutes]);
 
   function handleSelect(id: string) {
     setSelectedId(id);
@@ -160,10 +195,14 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
                   }}
                   className={
                     v.id === activeVehicleId
-                      ? "border-primary bg-primary/10 rounded border px-2.5 py-1 text-[11.5px]"
-                      : "border-border text-muted-foreground hover:bg-surface-2 rounded border px-2.5 py-1 text-[11.5px]"
+                      ? "border-primary bg-primary/10 flex items-center gap-1.5 rounded border px-2.5 py-1 text-[11.5px]"
+                      : "border-border text-muted-foreground hover:bg-surface-2 flex items-center gap-1.5 rounded border px-2.5 py-1 text-[11.5px]"
                   }
                 >
+                  <span
+                    className="inline-block h-2 w-2 rounded-full"
+                    style={{ backgroundColor: vehicleRouteColor(v.id) }}
+                  />
                   {v.name} · {v.width}m
                 </button>
               ))}
@@ -198,26 +237,20 @@ export function DispatchView({ scenarios, vehicles }: DispatchViewProps) {
                 title={scenario.title}
               />
             )}
-            {/* 후보 경로 전부 rank 별 색으로 렌더 — 사용자가 카드를 안 눌러도 대안이 지도에
-                한번에 보이게. 결정 경로(rank 1) 를 마지막에 그려 위로 올라오게 한다. */}
-            {routes
-              .slice()
-              .sort((a, b) => b.rank - a.rank)
-              .map((r) => {
-                const isDecision = r.rank === decisionRank;
-                const isPreview = previewingRank === r.rank;
-                const impassable = r.passableForVehicle === false;
-                return (
-                  <Polyline
-                    key={r.rank}
-                    path={toKakaoPath(r.coordinates)}
-                    strokeWeight={isDecision ? 6 : isPreview ? 5 : 4}
-                    strokeColor={impassable ? "#ef4444" : (ROUTE_COLORS[r.rank - 1] ?? "#94a3b8")}
-                    strokeOpacity={isDecision ? 0.95 : isPreview ? 0.85 : 0.55}
-                    strokeStyle={impassable ? "shortdash" : isDecision ? "solid" : "dash"}
-                  />
-                );
-              })}
+            {/* 3 차량 최적 경로를 한꺼번에 렌더 — 선택된 차량은 굵고 진하게, 나머지는 얇게. */}
+            {vehicleBestRoutes.map(({ vehicle: routeVehicle, route }) => {
+              const isActive = routeVehicle.id === activeVehicleId;
+              return (
+                <Polyline
+                  key={routeVehicle.id}
+                  path={toKakaoPath(route.coordinates)}
+                  strokeWeight={isActive ? 7 : 4}
+                  strokeColor={vehicleRouteColor(routeVehicle.id)}
+                  strokeOpacity={isActive ? 0.95 : 0.55}
+                  strokeStyle={route.passableForVehicle === false ? "shortdash" : "solid"}
+                />
+              );
+            })}
           </KakaoCanvas>
 
           {scenario && <IntakeOverlay scenario={scenario} />}
