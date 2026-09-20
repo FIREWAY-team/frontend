@@ -101,6 +101,24 @@ const VEHICLE_ROUTE_PROFILE: Record<string, VehicleRouteProfile> = {
  * 지연 시 차량별 CCTV+OSRM 시연 경로가 완전한 폴백을 제공하므로 라이브 브리핑을
  * 10초씩 멈추지 않는다.
  */
+/**
+ * CCTV 판독 커버리지. 12 대가 전부 모란에 몰려 있다(cctv_moran_a1 … a59 · 실측 범위
+ * lat 37.42997~37.432279 · lon 127.12609~127.129123). 그 바깥에는 골목을 해제할 근거가 없다.
+ *
+ * 반경 800m 는 모란시장 화점(중심에서 247m)을 넉넉히 담고 은행1동(1,485m)·상대원1동(3,234m)은
+ * 확실히 뺀다. CCTV 를 다른 동으로 넓히면 이 값도 같이 손봐야 한다.
+ */
+const CCTV_COVERAGE = { lat: 37.43112, lon: 127.12761, radiusM: 800 };
+
+function withinCctvCoverage(to: unknown): boolean {
+  if (!to || typeof to !== "object") return false;
+  const { lat, lon } = to as { lat?: unknown; lon?: unknown };
+  if (typeof lat !== "number" || typeof lon !== "number") return false;
+  const dy = (lat - CCTV_COVERAGE.lat) * 111_132;
+  const dx = (lon - CCTV_COVERAGE.lon) * 88_400; // 위도 37.43 에서 경도 1도
+  return Math.hypot(dx, dy) <= CCTV_COVERAGE.radiusM;
+}
+
 const BE_MAX_WAIT_MS = 4_000;
 
 export async function POST(request: Request) {
@@ -112,6 +130,9 @@ export async function POST(request: Request) {
   const vehicleId = String(body.vehicleId ?? body.vehicle_id ?? "pump-3.5");
   // 상황실 데모 · mode="shortest" 는 via 웨이포인트·차량 프로파일 데코 건너뛰고 순수 OSRM 최단.
   const shortest = body.mode === "shortest";
+  // 커버리지 밖이면 프로파일을 안 쓴다. 안 그러면 은행1동(801m)이 모란을 찍고 오느라
+  // 4,246m 가 되고, CCTV 가 없는 구역에서 CCTV 해제를 주장하게 된다.
+  const useProfile = !shortest && withinCctvCoverage(to);
 
   const beFallback = details
     ? { routes: [] as RouteCandidate[], assessments: [] as unknown[], warnings: [] as string[] }
@@ -126,14 +147,14 @@ export async function POST(request: Request) {
       }).catch(() => beFallback),
       new Promise((resolve) => setTimeout(() => resolve(beFallback), BE_MAX_WAIT_MS)),
     ]) as Promise<typeof beFallback>,
-    fetchOsrmRoutes(from, to, k, vehicleId, shortest).catch((err) => {
+    fetchOsrmRoutes(from, to, k, vehicleId, !useProfile).catch((err) => {
       console.warn(`[route:osrm] ${err instanceof Error ? err.message : String(err)}`);
       return [] as RouteCandidate[];
     }),
     details ? fetchCctvMarkers() : Promise.resolve([]),
   ]);
 
-  const osrmRoutes = shortest ? rawOsrmRoutes : decorateFallbackRoutes(rawOsrmRoutes, vehicleId);
+  const osrmRoutes = useProfile ? decorateFallbackRoutes(rawOsrmRoutes, vehicleId) : rawOsrmRoutes;
 
   const beRoutes: RouteCandidate[] = details
     ? ((beResult as { routes: RouteCandidate[] }).routes ?? [])
@@ -158,6 +179,11 @@ export async function POST(request: Request) {
         cctvId: marker.id,
         confidence: marker.measurementStatus === "unavailable" ? 0 : 0.95,
       }));
+  if (!useProfile && !shortest) {
+    warnings.push(
+      "cctv_coverage: CCTV 판독 구역(모란) 밖입니다. 골목 해제 근거가 없어 도로 기반 경로만 제공합니다.",
+    );
+  }
   if (!beRoutes.length && osrmRoutes.length) {
     warnings.push("route_source: BE 지연 · 차량별 CCTV 판정과 OSRM 시연 경로를 사용.");
   } else if (osrmRoutes.length) {
