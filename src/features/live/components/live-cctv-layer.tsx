@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CustomOverlayMap } from "react-kakao-maps-sdk";
+import { CustomOverlayMap, useMap } from "react-kakao-maps-sdk";
 
 import type { CctvMarker } from "@/features/cctv/api";
 import type { CctvReading, VerdictStatus } from "@/features/cctv/types";
@@ -23,6 +23,9 @@ import { CctvPopup } from "@/features/map/components/cctv-popup";
 const REFRESH_SAFETY_MARGIN_SEC = 30;
 
 export function LiveCctvLayer({ vehicleId }: { vehicleId: string }) {
+  // useMap 은 react-kakao-maps-sdk 가 `<Map>` 안 컨텍스트에서 map 인스턴스를 돌려준다.
+  // 마커 클릭 시 panTo 로 살짝 옮겨 팝업이 상단 뷰포트 밖으로 잘리는 문제를 막는다 (§09-20 홍근 관찰).
+  const map = useMap();
   const [markers, setMarkers] = useState<CctvMarker[]>([]);
   const [selected, setSelected] = useState<{
     id: string;
@@ -83,6 +86,12 @@ export function LiveCctvLayer({ vehicleId }: { vehicleId: string }) {
         clearTimeout(refreshTimerRef.current);
         refreshTimerRef.current = null;
       }
+      // ⚠️ 팝업을 열기 전에 마커 위치로 지도를 살짝 이동 · yAnchor=1.15 로 마커 위에 뜨는 팝업이
+      //    상단 뷰포트 밖으로 잘리는 문제를 막는다. panTo 는 부드럽게 옮기고 zoom 은 유지한다.
+      const marker = markers.find((m) => m.id === id);
+      if (map && marker && typeof window !== "undefined" && window.kakao?.maps) {
+        map.panTo(new window.kakao.maps.LatLng(marker.lat, marker.lon));
+      }
       setSelected({ id, reading: null, loading: true });
       try {
         const res = await fetch(`/api/cctv/${encodeURIComponent(id)}`, { cache: "no-store" });
@@ -97,7 +106,7 @@ export function LiveCctvLayer({ vehicleId }: { vehicleId: string }) {
         setSelected({ id, reading: null, loading: false });
       }
     },
-    [scheduleRefresh],
+    [scheduleRefresh, map, markers],
   );
 
   function closePopup() {
