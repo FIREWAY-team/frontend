@@ -160,6 +160,9 @@ function BriefingContent({ incident }: { incident: Scenario }) {
 
   // 재탐색 발생 후 대형 펌프차의 "진행 비율" 을 원본보다 느리게 (우회로 시간 더 걸림)
   // 시각적 효과 · 다른 차량은 원본 경로 그대로
+  // ⚠️ 차량별 polyline 이 완전히 겹쳐 1 색만 보이던 문제 (§#50) 해결 · 각 차량 경로를
+  //    lat 방향으로 ~9m 평행 오프셋 → 지도에서 3 차선처럼 나란히 보인다. 마커도 같은
+  //    오프셋을 받아야 폴리라인 위에 올라앉는다.
   const vehiclePositions = useMemo(() => {
     if (!routeData) return [] as Array<{ id: string; lat: number; lon: number }>;
     const result: Array<{ id: string; lat: number; lon: number }> = [];
@@ -167,7 +170,9 @@ function BriefingContent({ incident }: { incident: Scenario }) {
       // 차량별로 약간 다른 progress 시뮬레이션 · 소형이 가장 빠르다는 가정
       const speedBias = vid === "pump-3.5" ? 1.08 : vid === "pump-8" ? 1.0 : 0.92;
       const effectiveProgress = Math.min(1, progress * speedBias);
-      const path = vid === "pump-15" && reroutedPath ? reroutedPath : routeData.coordinates;
+      const base = vid === "pump-15" && reroutedPath ? reroutedPath : routeData.coordinates;
+      const idx = assignedVehicles.indexOf(vid);
+      const path = offsetPath(base, idx, assignedVehicles.length);
       const pt = sampleAlongPath(path, effectiveProgress);
       if (pt) result.push({ id: vid, lat: pt[1], lon: pt[0] });
     }
@@ -245,18 +250,19 @@ function BriefingContent({ incident }: { incident: Scenario }) {
             position={{ lat: incident.location.lat, lng: incident.location.lon }}
             title={incident.title}
           />
-          {/* 메인 경로 polyline (차량별로 색상 표시) */}
+          {/* 메인 경로 polyline (차량별 색상 · lat 오프셋으로 평행선처럼 분리 §#50) */}
           {routeData &&
-            visibleVehicles.map((vid, i) => {
-              const path = vid === "pump-15" && reroutedPath ? reroutedPath : routeData.coordinates;
-              // 겹침 방지 · 차량별로 살짝 opacity 다르게
+            visibleVehicles.map((vid) => {
+              const base = vid === "pump-15" && reroutedPath ? reroutedPath : routeData.coordinates;
+              const offsetIdx = assignedVehicles.indexOf(vid);
+              const path = offsetPath(base, offsetIdx, assignedVehicles.length);
               return (
                 <Polyline
                   key={vid}
                   path={path.map(([lon, lat]) => ({ lat, lng: lon }))}
-                  strokeWeight={5 - i}
+                  strokeWeight={5}
                   strokeColor={VEHICLE_COLOR[vid] ?? "#64748b"}
-                  strokeOpacity={0.75}
+                  strokeOpacity={0.9}
                   strokeStyle={vid === "pump-15" && reroutedPath ? "dash" : "solid"}
                 />
               );
@@ -502,6 +508,28 @@ function EmptyState({ onBack }: { onBack: () => void }) {
 
 // ──────────────────────────────────────────────────────────────
 // 유틸
+
+/**
+ * 차량별 polyline 평행 오프셋 (§#50).
+ *
+ * BE 가 아직 차량별 라우팅을 돌려주지 않아 FE 가 단일 경로를 공유해 색상만 다르게 그리는데,
+ * 좌표가 완전히 같으면 가장 위에 그려진 색만 보인다. lat 를 미세하게 평행 이동해 지도에서
+ * 3 차선처럼 나란히 보이게 한다.
+ *
+ * 지도 레벨 5 (약 500m 가시 폭) 기준 ~9m 간격이 가장 자연스러움 — 더 크게 하면 경로가
+ * 실제 도로를 벗어나 보인다. true-perpendicular 가 아니라 단순 lat 평행 이동이지만
+ * 심사 영상 축척에서는 평행선처럼 보여 충분하다.
+ */
+function offsetPath(
+  path: Array<[number, number]>,
+  index: number,
+  total: number,
+): Array<[number, number]> {
+  if (total <= 1) return path;
+  const BASE_OFFSET_DEG = 0.00008; // 약 9m
+  const shift = (index - (total - 1) / 2) * BASE_OFFSET_DEG;
+  return path.map(([lon, lat]) => [lon, lat + shift]);
+}
 
 function sampleAlongPath(path: Array<[number, number]>, t: number): [number, number] | null {
   if (path.length === 0) return null;
