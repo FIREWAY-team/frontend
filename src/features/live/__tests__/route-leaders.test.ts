@@ -1,4 +1,4 @@
-import { routeLeaders, vehiclesForSeverity } from "../briefing-constants";
+import { lanePath, routeLeaders, vehiclesForSeverity } from "../briefing-constants";
 
 const shared: Array<[number, number]> = [
   [127.1394, 37.4283],
@@ -55,5 +55,20 @@ describe("vehiclesForSeverity", () => {
   it("중·대 규모는 4대를 모두 배정한다", () => {
     expect(vehiclesForSeverity("large")).toHaveLength(4);
     expect(vehiclesForSeverity("medium")).toHaveLength(4);
+  });
+});
+
+describe("lanePath", () => {
+  it("동쪽으로 가는 경로를 오른쪽(남쪽)으로 평행 이동한다", () => {
+    const east: Array<[number, number]> = [
+      [127.12, 37.43],
+      [127.13, 37.43],
+    ];
+    const shifted = lanePath(east, 7);
+    for (const [lon, lat] of shifted) {
+      expect(lat).toBeCloseTo(37.43 - 7 / 111_320, 8);
+      expect([127.12, 127.13]).toContainEqual(Number(lon.toFixed(6)));
+    }
+    expect(lanePath(east, 0)).toEqual(east);
   });
 });
