@@ -4,6 +4,7 @@ import type {
   CreateStoredRoutesRequest,
   CreateUploadUrlRequest,
   Incident,
+  IncidentIntake,
   IncidentStatus,
   StoredExcludedReason,
   StoredRoute,
@@ -14,6 +15,7 @@ import { INCIDENT_STATUS } from "./types";
 /**
  * BE `IncidentResponse` wire shape · Jackson snake_case.
  * ⚠️ 실 코드로 확인 (backend/src/.../IncidentResponse.java · 2026-09-15).
+ * ⚠️ intake 필드는 BE #41 (2026-10-08 머지 예정) 에서 추가 · 머지 전엔 전부 undefined.
  */
 export interface BeIncident {
   incident_no: string;
@@ -24,6 +26,13 @@ export interface BeIncident {
   summary?: string | null;
   received_at: string;
   closed_at: string | null;
+  reporter_name?: string | null;
+  reporter_phone?: string | null;
+  severity?: string | null;
+  estimated_area_m2?: number | null;
+  building_type?: string | null;
+  casualties_reported?: boolean | null;
+  notes?: string | null;
 }
 
 /**
@@ -58,7 +67,25 @@ export function toIncident(be: BeIncident): Incident {
     summary: be.summary ?? undefined,
     receivedAt: be.received_at,
     closedAt: be.closed_at,
+    intake: toIncidentIntake(be),
   };
+}
+
+/** BE #41 intake 필드 (snake) → IncidentIntake (camel). 하나도 없으면 undefined. */
+function toIncidentIntake(be: BeIncident): IncidentIntake | undefined {
+  const intake: IncidentIntake = {};
+  if (be.reporter_name) intake.reporterName = be.reporter_name;
+  if (be.reporter_phone) intake.reporterPhone = be.reporter_phone;
+  if (be.severity === "small" || be.severity === "medium" || be.severity === "large") {
+    intake.severity = be.severity;
+  }
+  if (typeof be.estimated_area_m2 === "number") intake.estimatedAreaM2 = be.estimated_area_m2;
+  if (be.building_type) intake.buildingType = be.building_type;
+  if (typeof be.casualties_reported === "boolean") {
+    intake.casualtiesReported = be.casualties_reported;
+  }
+  if (be.notes) intake.notes = be.notes;
+  return Object.keys(intake).length > 0 ? intake : undefined;
 }
 
 /**
@@ -71,7 +98,7 @@ export function parseIncidentStatus(raw: string): IncidentStatus {
   return known ?? INCIDENT_STATUS.RECEIVED;
 }
 
-/** UI 요청 (camel) → BE 요청 body (snake). */
+/** UI 요청 (camel) → BE 요청 body (snake). intake 필드도 함께 보낸다 (BE #41). */
 export function toBeIncidentRequest(req: CreateIncidentRequest): Record<string, unknown> {
   const body: Record<string, unknown> = {
     address: req.address,
@@ -79,6 +106,16 @@ export function toBeIncidentRequest(req: CreateIncidentRequest): Record<string, 
     lon: req.lon,
   };
   if (req.summary !== undefined && req.summary !== "") body.summary = req.summary;
+  const i = req.intake;
+  if (i) {
+    if (i.reporterName) body.reporter_name = i.reporterName;
+    if (i.reporterPhone) body.reporter_phone = i.reporterPhone;
+    if (i.severity) body.severity = i.severity;
+    if (typeof i.estimatedAreaM2 === "number") body.estimated_area_m2 = i.estimatedAreaM2;
+    if (i.buildingType) body.building_type = i.buildingType;
+    if (typeof i.casualtiesReported === "boolean") body.casualties_reported = i.casualtiesReported;
+    if (i.notes) body.notes = i.notes;
+  }
   return body;
 }
 

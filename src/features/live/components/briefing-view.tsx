@@ -154,11 +154,29 @@ function BriefingContent({ incident }: { incident: Scenario }) {
     });
   }, [progress, dispatched, rerouteFired, routesByVehicle, assignedVehicles]);
 
-  // 3. 애니메이션 tick
+  // 3. 애니메이션 tick + BE 상태 전이 (§D7)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startDispatch = useCallback(() => {
     if (dispatched || !anyRouteLoaded) return;
     setDispatched(true);
+
+    // 백그라운드로 BE 에 DISPATCHED 전이 (§D7). 실패해도 UI 애니메이션은 그대로 진행.
+    // BE 가 scenarios mock 상태면 404 가 뜰 수 있으므로 조용히 삼킨다.
+    if (incident.id) {
+      void (async () => {
+        try {
+          await fetch(`/api/incidents/${encodeURIComponent(incident.id)}/status`, {
+            method: "PATCH",
+            cache: "no-store",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "DISPATCHED" }),
+          });
+        } catch {
+          /* 조용히 폴백 · 녹화 중 실패해도 애니메이션은 그대로 돈다 */
+        }
+      })();
+    }
+
     const started = Date.now();
     timerRef.current = setInterval(() => {
       const elapsed = Date.now() - started;
@@ -169,7 +187,7 @@ function BriefingContent({ incident }: { incident: Scenario }) {
         timerRef.current = null;
       }
     }, ANIMATION_TICK_MS);
-  }, [dispatched, anyRouteLoaded]);
+  }, [dispatched, anyRouteLoaded, incident.id]);
 
   useEffect(
     () => () => {
