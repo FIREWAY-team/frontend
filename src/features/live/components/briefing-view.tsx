@@ -20,6 +20,7 @@ import {
   ANIMATION_TOTAL_MS,
   ARRIVAL_CCTV_RADIUS_M,
   REROUTE_TRIGGER_RATIO,
+  routeLeaders,
   VEHICLE_COLOR,
   VEHICLE_LABEL,
   VEHICLE_SHORT,
@@ -121,6 +122,16 @@ function BriefingContent({ incident }: { incident: Scenario }) {
       alive = false;
     };
   }, [incident, assignedVehicles]);
+
+  // 같은 길로 가는 차량 묶음 · 대표 차량의 색 · 선 하나로 그린다 (중형·대형·굴절 → 대형 빨강).
+  const leaders = useMemo(
+    () => routeLeaders(assignedVehicles, routesByVehicle),
+    [assignedVehicles, routesByVehicle],
+  );
+  const rerouteGroupLabel = assignedVehicles
+    .filter((v) => leaders[v] === "pump-15")
+    .map((v) => VEHICLE_SHORT[v] ?? v)
+    .join("·");
 
   // 적어도 하나의 route 가 로드됐는지 (헤더·사이드바 분기용)
   const anyRouteLoaded = useMemo(
@@ -224,6 +235,8 @@ function BriefingContent({ incident }: { incident: Scenario }) {
 
   const visibleVehicles =
     viewTab === "all" ? assignedVehicles : assignedVehicles.filter((v) => v === viewTab);
+  // 지도 선은 묶음 대표 기준 · 중형 탭을 골라도 중형이 속한 대형 묶음 선이 보인다.
+  const visibleLeaders = [...new Set(visibleVehicles.map((v) => leaders[v] ?? v))];
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
@@ -288,7 +301,7 @@ function BriefingContent({ incident }: { incident: Scenario }) {
               재탐색 후: 소형 꼬리 회색 점선 (대형이 못 가는 길) + 소형 전체 파랑 + 대형 전체 빨강. */}
           {!rerouteFired &&
             // 재탐색 전 · 소형 polyline 만 (두 차량 공유 중). visibleVehicles 가 소형을 포함할 때만.
-            (visibleVehicles.includes("pump-3.5") && routesByVehicle["pump-3.5"] ? (
+            (visibleLeaders.includes("pump-3.5") && routesByVehicle["pump-3.5"] ? (
               <Polyline
                 path={routesByVehicle["pump-3.5"]!.coordinates.map(([lon, lat]) => ({
                   lat,
@@ -300,7 +313,7 @@ function BriefingContent({ incident }: { incident: Scenario }) {
                 strokeStyle="solid"
               />
             ) : null)}
-          {rerouteFired && renderReroutePolylines(routesByVehicle, visibleVehicles, commonPrefix)}
+          {rerouteFired && renderReroutePolylines(routesByVehicle, visibleLeaders, commonPrefix)}
           {/* 차량 Marker · 출동 후 애니메이션 중 */}
           {dispatched &&
             vehiclePositions
@@ -311,7 +324,7 @@ function BriefingContent({ incident }: { incident: Scenario }) {
                   position={{ lat: v.lat, lng: v.lon }}
                   title={VEHICLE_LABEL[v.id] ?? v.id}
                   image={{
-                    src: makeVehicleIconDataUri(VEHICLE_COLOR[v.id] ?? "#64748b"),
+                    src: makeVehicleIconDataUri(VEHICLE_COLOR[leaders[v.id] ?? v.id] ?? "#64748b"),
                     size: { width: 30, height: 30 },
                     options: { offset: { x: 15, y: 15 } },
                   }}
@@ -324,7 +337,7 @@ function BriefingContent({ incident }: { incident: Scenario }) {
           <div className="animate-fade-in absolute bottom-6 left-6 z-10 flex items-start gap-2 rounded-md border border-amber-400 bg-amber-50 px-3 py-2 text-amber-900 shadow-lg dark:bg-amber-950 dark:text-amber-200">
             <AlertTriangle size={16} strokeWidth={2} className="mt-0.5 shrink-0" />
             <div className="text-[12px] leading-tight">
-              <div className="font-semibold">대형 소방차 재탐색 · A41 경유</div>
+              <div className="font-semibold">{rerouteGroupLabel || "대형"} 재탐색 · A41 경유</div>
               <div>A21 골목 CCTV 통행 불확실 감지 · 북쪽 큰길로 우회 진입</div>
             </div>
           </div>
@@ -344,6 +357,7 @@ function BriefingContent({ incident }: { incident: Scenario }) {
             routesByVehicle={routesByVehicle}
             routeLoading={routeLoading}
             assignedVehicles={assignedVehicles}
+            leaders={leaders}
             dispatched={dispatched}
             progress={progress}
             onDispatch={startDispatch}
@@ -361,6 +375,7 @@ function BriefingSidebar({
   routesByVehicle,
   routeLoading,
   assignedVehicles,
+  leaders,
   dispatched,
   progress,
   onDispatch,
@@ -369,6 +384,7 @@ function BriefingSidebar({
   routesByVehicle: Record<string, RouteCandidate | null>;
   routeLoading: boolean;
   assignedVehicles: string[];
+  leaders: Record<string, string>;
   dispatched: boolean;
   progress: number;
   onDispatch: () => void;
@@ -418,7 +434,7 @@ function BriefingSidebar({
                   <div className="flex items-center gap-2">
                     <span
                       className="h-2.5 w-2.5 rounded-full"
-                      style={{ backgroundColor: VEHICLE_COLOR[vid] }}
+                      style={{ backgroundColor: VEHICLE_COLOR[leaders[vid] ?? vid] }}
                     />
                     <span className="text-foreground text-[12px] font-medium">
                       {VEHICLE_LABEL[vid] ?? vid}
