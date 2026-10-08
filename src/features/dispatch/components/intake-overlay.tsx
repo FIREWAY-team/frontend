@@ -8,6 +8,55 @@ interface IntakeOverlayProps {
   scenario: Scenario;
 }
 
+/**
+ * BE `/api/scenarios` 응답에 intake 필드가 없을 때 · 시연 화면이 "미확인" 로 도배되는 걸 막기 위해
+ * 시나리오 id 를 시드로 결정론적 랜덤 생성. 새로고침해도 값이 흔들리지 않고 시나리오마다 다르다.
+ * ⚠️ 라이브 전환 시 BE 값이 오면 그 값이 우선 (?? 연산으로 덮인다).
+ */
+const SURNAMES = ["김", "이", "박", "최", "정", "한", "조", "윤"];
+const BUILDINGS = [
+  "3층 상가 (1층 편의점)",
+  "5층 상가 (1층 음식점)",
+  "1층 상가 (기름집)",
+  "2층 다세대 주택",
+  "4층 오피스텔",
+  "1층 철골 공장",
+];
+const NOTES = [
+  "주민 대피 유도 중 · 인근 도로 정체",
+  "지하 주차장 연기 확산 신고",
+  "가연물 다량 · 골목 진입 어려움",
+  "옥상 대피 인원 확인 필요",
+  "튀김기 화재, 초기 진화 시도 중",
+];
+
+function seedHash(seed: string): number {
+  let h = 0;
+  for (let i = 0; i < seed.length; i += 1) h = (h * 31 + seed.charCodeAt(i)) & 0xffffffff;
+  return Math.abs(h);
+}
+
+function synthesizeIntake(scenario: Scenario): ScenarioIntake {
+  const src = scenario.intake ?? {};
+  const h = seedHash(scenario.id);
+  const surname = SURNAMES[h % SURNAMES.length];
+  const phoneTail = String(2000 + (h % 7999)).padStart(4, "0");
+  const hour = 13 + ((h >> 3) % 5);
+  const minute = ((h >> 5) % 60).toString().padStart(2, "0");
+  const severity = (["small", "medium", "large"] as const)[(h >> 7) % 3];
+  const areaBase = severity === "small" ? 20 : severity === "medium" ? 55 : 220;
+  return {
+    reporterName: src.reporterName ?? `${surname}OO (신고자)`,
+    reporterPhone: src.reporterPhone ?? `010-****-${phoneTail}`,
+    reportedAt: src.reportedAt ?? `2026-09-20T${String(hour).padStart(2, "0")}:${minute}:00+09:00`,
+    severity: src.severity ?? severity,
+    estimatedAreaM2: src.estimatedAreaM2 ?? areaBase + (h % 30),
+    buildingType: src.buildingType ?? BUILDINGS[h % BUILDINGS.length],
+    casualtiesReported: src.casualtiesReported ?? severity === "large",
+    notes: src.notes ?? NOTES[(h >> 11) % NOTES.length],
+  };
+}
+
 const SEVERITY_LABEL: Record<NonNullable<ScenarioIntake["severity"]>, string> = {
   small: "소형",
   medium: "중형",
@@ -29,7 +78,7 @@ const SEVERITY_BADGE: Record<NonNullable<ScenarioIntake["severity"]>, string> = 
  *    시각만 표시 (§CLAUDE.md 시연 시나리오 데이터).
  */
 export function IntakeOverlay({ scenario }: IntakeOverlayProps) {
-  const intake = scenario.intake ?? {};
+  const intake = synthesizeIntake(scenario);
 
   return (
     <div className="border-border bg-surface/95 pointer-events-auto absolute right-3 bottom-3 z-10 w-72 rounded-md border shadow-lg backdrop-blur">

@@ -14,6 +14,8 @@ export const FIRE_STATION = { lat: 37.4283, lon: 127.1394 } as const;
 interface UseBackendRoutesInput {
   destination: { lat: number; lon: number } | null;
   vehicleId: string;
+  /** "shortest" 면 /api/route 가 via 웨이포인트 없이 OSRM 최단 경로를 반환 (상황실 데모용). */
+  mode?: "shortest";
 }
 
 export interface UseBackendRoutesResult {
@@ -63,8 +65,9 @@ function cacheSet(key: string, value: RouteCandidate[]) {
 export function useBackendRoutes({
   destination,
   vehicleId,
+  mode,
 }: UseBackendRoutesInput): UseBackendRoutesResult {
-  const key = destination ? `${destination.lat},${destination.lon}|${vehicleId}` : "";
+  const key = destination ? `${destination.lat},${destination.lon}|${vehicleId}|${mode ?? ""}` : "";
   // 캐시 hit 은 첫 렌더부터 값이 보이도록 useState 초기값으로 집어넣는다.
   const [snapshot, setSnapshot] = useState<{ key: string; value: RouteCandidate[] }>(() => {
     const cached = key ? cacheGet(key) : null;
@@ -93,6 +96,7 @@ export function useBackendRoutes({
             from: FIRE_STATION,
             to: destination,
             k: 3,
+            ...(mode ? { mode } : {}),
           }),
         });
         if (!res.ok) {
@@ -110,7 +114,7 @@ export function useBackendRoutes({
     return () => {
       alive = false;
     };
-  }, [key, destination, vehicleId]);
+  }, [key, destination, vehicleId, mode]);
 
   const isCurrent = snapshot.key === key;
   return {

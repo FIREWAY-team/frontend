@@ -17,6 +17,7 @@ export interface CctvMarker {
   lat: number;
   lon: number;
   status: VerdictStatus;
+  verdict: Record<string, string>;
   measurementStatus?: "computed" | "unavailable";
 }
 
@@ -45,16 +46,20 @@ export async function fetchCctvMarkers(): Promise<CctvMarker[]> {
     const raw = (await res.json()) as BeCctvSummary[];
     if (!Array.isArray(raw)) return [];
     return raw
-      .filter((r): r is BeCctvSummary & { lat: number; lon: number } =>
-        typeof r.lat === "number" && typeof r.lon === "number")
+      .filter(
+        (r): r is BeCctvSummary & { lat: number; lon: number } =>
+          typeof r.lat === "number" && typeof r.lon === "number",
+      )
       .map((r) => ({
         id: r.cctv_id,
         lat: r.lat,
         lon: r.lon,
         status: toVerdictStatus(r.status ?? r.verdict?.status),
-        measurementStatus: r.measurement_status === "computed" || r.measurement_status === "unavailable"
-          ? r.measurement_status
-          : undefined,
+        verdict: r.verdict ?? {},
+        measurementStatus:
+          r.measurement_status === "computed" || r.measurement_status === "unavailable"
+            ? r.measurement_status
+            : undefined,
       }));
   } catch (err) {
     const name = err instanceof Error ? err.name : "unknown";

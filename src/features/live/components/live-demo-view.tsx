@@ -10,6 +10,7 @@ import type { Incident } from "@/features/incidents/types";
 import {
   FIRE_STATION,
   LIVE_ADDRESS,
+  LIVE_DESTINATION_COORDS,
   LIVE_VEHICLES,
   STEP_TITLES,
   type StepId,
@@ -19,21 +20,36 @@ import { useLiveRoutes } from "../use-live-routes";
 import { LiveCctvLayer } from "./live-cctv-layer";
 
 /** Live 시연 화점 설명 · 신고 접수 payload 로 사용 · 심사 시연에서 "실 접수" 신호. */
-const LIVE_INCIDENT_SUMMARY = "라이브 시연 · 중원구 주소 지오코딩 화점 · 소방차 진입 필요";
+const LIVE_INCIDENT_SUMMARY = "라이브 시연 · 모란 A34 인접 화점 · 소방차 진입 필요";
 
 export function LiveDemoView() {
   const step = useSyncExternalStore(subscribeHash, readStep, () => 1 as StepId);
   const [vehicleId, setVehicleId] = useState<string>("pump-3.5");
-  const [destination, setDestination] = useState<{ lat: number; lon: number } | null>(null);
-  const [addressError, setAddressError] = useState("");
   const [revision, setRevision] = useState(0);
-  const { data, error, loading } = useLiveRoutes(destination, vehicleId, step >= 3, revision);
+  const destination = LIVE_DESTINATION_COORDS;
+  const smallRoutes = useLiveRoutes(destination, "pump-3.5", step >= 2, revision);
+  const mediumRoutes = useLiveRoutes(destination, "pump-8", step >= 2, revision);
+  const largeRoutes = useLiveRoutes(destination, "pump-15", step >= 2, revision);
+  const routeQueries = {
+    "pump-3.5": smallRoutes,
+    "pump-8": mediumRoutes,
+    "pump-15": largeRoutes,
+  };
+  const selectedQuery = routeQueries[vehicleId as keyof typeof routeQueries];
+  const data = selectedQuery.data;
+  const loading = [smallRoutes, mediumRoutes, largeRoutes].some((query) => query.loading);
+  const error = selectedQuery.error;
   const routes = data?.routes ?? [];
   // 통과 가능 후보가 없으면 첫 후보를 "차선책" 으로 보여준다 · 시연 흐름 유지 (§handoff frontend.md).
   // explanation 에 라우터 폴백/제약이 그대로 실려 심사자가 상태를 알 수 있다.
   const best =
     routes.find((r) => r.passableForVehicle === true && !r.hasUnresolvedStaticNoGo) ?? routes[0];
   const vehicle = LIVE_VEHICLES.find((v) => v.id === vehicleId)!;
+  const vehicleRoutes = LIVE_VEHICLES.map((item) => {
+    const query = routeQueries[item.id];
+    const route = bestRoute(query.data?.routes ?? []);
+    return { vehicle: item, route };
+  });
 
   // 실제 접수된 신고 · null 이면 아직 접수 전이거나 BE 실패 (조용히 fallthrough).
   const [incident, setIncident] = useState<Incident | null>(null);
@@ -117,9 +133,9 @@ export function LiveDemoView() {
           ))}
         </nav>
         <label className="flex items-center gap-2 text-sm">
-          출동 차량
+          경로 상세
           <select
-            aria-label="출동 차량"
+            aria-label="경로 상세 차량"
             value={vehicleId}
             onChange={(e) => setVehicleId(e.target.value)}
             className="border-border bg-surface rounded border p-2"
@@ -133,18 +149,15 @@ export function LiveDemoView() {
         </label>
       </header>
       <div className="relative flex min-h-0 flex-1">
-        <KakaoCanvas center={destination ?? FIRE_STATION} level={step < 3 ? 5 : 3}>
-          <ResolveAddress onResolved={setDestination} onError={setAddressError} />
+        <KakaoCanvas center={destination} level={step < 3 ? 5 : 3}>
           <MapMarker
             position={{ lat: FIRE_STATION.lat, lng: FIRE_STATION.lon }}
             title="성남소방서 · 출발"
           />
-          {destination && (
-            <MapMarker
-              position={{ lat: destination.lat, lng: destination.lon }}
-              title={LIVE_ADDRESS}
-            />
-          )}
+          <MapMarker
+            position={{ lat: destination.lat, lng: destination.lon }}
+            title={LIVE_ADDRESS}
+          />
           {step >= 3 &&
             data?.assessments.map((a) => (
               <Polyline
@@ -160,15 +173,19 @@ export function LiveDemoView() {
           {/* 실 CCTV 12개 마커 · 3단계 이후 노출 · 클릭 시 팝업 (§handoff frontend.md #1). */}
           {step >= 3 && <LiveCctvLayer vehicleId={vehicleId} />}
           {step >= 4 &&
-            (step === 4 ? (best ? [best] : []) : routes).map((r) => (
-              <Polyline
-                key={r.rank}
-                path={r.coordinates.map(([lng, lat]) => ({ lat, lng }))}
-                strokeWeight={r === best ? 7 : 4}
-                strokeColor={r === best ? "#3b82f6" : r.passableForVehicle ? "#22c55e" : "#ef4444"}
-                strokeStyle={r.passableForVehicle ? "solid" : "dash"}
-              />
-            ))}
+            vehicleRoutes.map(
+              ({ vehicle: routeVehicle, route }) =>
+                route && (
+                  <Polyline
+                    key={routeVehicle.id}
+                    path={route.coordinates.map(([lng, lat]) => ({ lat, lng }))}
+                    strokeWeight={routeVehicle.id === vehicleId ? 8 : 5}
+                    strokeColor={vehicleRouteColor(routeVehicle.id)}
+                    strokeOpacity={routeVehicle.id === vehicleId ? 0.95 : 0.58}
+                    strokeStyle={route.passableForVehicle ? "solid" : "dash"}
+                  />
+                ),
+            )}
         </KakaoCanvas>
 
         {/* 접수 번호 배지 · 2단계 이후 상시 노출 · "실 접수됐다" 신호. */}
@@ -189,23 +206,19 @@ export function LiveDemoView() {
         >
           <h1 className="text-base font-semibold">{LIVE_ADDRESS}</h1>
           <p className="text-muted-foreground mt-1 text-xs">
-            {vehicle.label} · {STEP_TITLES[step - 1]} · AI 판독: 목데이터
+            {step >= 4 ? `${vehicle.label} 상세` : "소형·중형·대형 동시 분석"} ·{" "}
+            {STEP_TITLES[step - 1]} · AI 판독: 목데이터
           </p>
-          {!destination && (
-            <p role="status" className="mt-3 text-sm">
-              {addressError || "주소의 지도 좌표를 확인하고 있습니다. 지도 API 설정이 필요합니다."}
-            </p>
-          )}
           {step === 1 && (
             <p className="my-4 text-sm">
-              화재 신고 시연입니다. 주소를 확인한 뒤 출동 차량을 선택해 주세요.
+              화재 신고를 접수하면 소형·중형·대형 소방차의 CCTV 판정과 경로를 동시에 계산합니다.
             </p>
           )}
           {step === 2 && (
             <>
               <p className="my-4 text-sm">
-                선택한 차량의 모의 AI 판독 결과를 조회하고, 통행 가능한 골목을 반영해 도로 경로를
-                탐색합니다.
+                접수된 화점 기준으로 모든 출동 차량의 통행 가능 골목과 도로 경로를 병렬 분석하고
+                있습니다. 차량 선택은 계산 대상이 아니라 상세 경로 필터입니다.
               </p>
               {incident && (
                 <p className="text-muted-foreground my-2 text-xs">
@@ -219,7 +232,7 @@ export function LiveDemoView() {
             <>
               {loading && (
                 <p role="status" className="my-4 text-sm">
-                  차량별 모의 AI 판정 조회 및 도로 경로 탐색 중…
+                  소형·중형·대형 CCTV 판정 및 도로 경로 동시 탐색 중…
                 </p>
               )}
               {error && (
@@ -253,23 +266,44 @@ export function LiveDemoView() {
                       차량을 선택해 주세요.
                     </p>
                   )}
-                  {step >= 4 &&
-                    (step === 4 ? (best ? [best] : []) : routes).map((r) => (
-                      <div key={r.rank} className="border-border my-2 rounded border p-3 text-sm">
-                        <b>
-                          {r === best ? "추천 경로" : `후보 ${r.rank}`} ·{" "}
-                          {r.passableForVehicle ? "통행 가능" : "진입 불가·미확인"}
-                        </b>
-                        <p>
-                          {Math.floor(r.etaSec / 60)}분 {r.etaSec % 60}초 ·{" "}
-                          {(r.distanceM / 1000).toFixed(2)} km
-                        </p>
-                        <p className="text-muted-foreground mt-2 text-xs">{r.explanation}</p>
-                        <p className="mt-1 text-xs">
-                          CCTV 통과 근거: {r.unlockedByCctv?.join(", ") || "해제 대상 구간 없음"}
-                        </p>
-                      </div>
-                    ))}
+                  {step >= 4 && (
+                    <div className="my-3 space-y-2">
+                      {vehicleRoutes.map(({ vehicle: routeVehicle, route }) => (
+                        <button
+                          key={routeVehicle.id}
+                          type="button"
+                          onClick={() => setVehicleId(routeVehicle.id)}
+                          className={`border-border w-full rounded border p-3 text-left text-sm ${routeVehicle.id === vehicleId ? "ring-primary ring-2" : ""}`}
+                        >
+                          <span
+                            className="mr-2 inline-block h-2.5 w-2.5 rounded-full"
+                            style={{ backgroundColor: vehicleRouteColor(routeVehicle.id) }}
+                          />
+                          <b>{routeVehicle.label}</b> ·{" "}
+                          {route
+                            ? route.passableForVehicle
+                              ? "통행 가능"
+                              : "진입 제한"
+                            : "계산 중"}
+                          {route && (
+                            <span className="text-muted-foreground ml-2 text-xs">
+                              {Math.floor(route.etaSec / 60)}분 {route.etaSec % 60}초 ·{" "}
+                              {(route.distanceM / 1000).toFixed(2)}km
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {step === 5 && best && (
+                    <div className="border-border my-2 rounded border p-3 text-sm">
+                      <b>{vehicle.label} 선택 경로 상세</b>
+                      <p className="text-muted-foreground mt-2 text-xs">{best.explanation}</p>
+                      <p className="mt-1 text-xs">
+                        CCTV 통과 근거: {best.unlockedByCctv?.join(", ") || "해제 대상 구간 없음"}
+                      </p>
+                    </div>
+                  )}
                   {data.warnings.map((w) => (
                     <p key={w} className="text-muted-foreground my-2 text-xs">
                       {w.replace(/^[a-z_]+:\s*/, "")}
@@ -318,7 +352,7 @@ export function LiveDemoView() {
                 : step === 5
                   ? "처음부터"
                   : step === 2
-                    ? "CCTV 판정·경로 탐색"
+                    ? "전체 차량 CCTV 판정 보기"
                     : "다음"}
             </button>
           </div>
@@ -328,26 +362,16 @@ export function LiveDemoView() {
   );
 }
 
-function ResolveAddress({
-  onResolved,
-  onError,
-}: {
-  onResolved: (value: { lat: number; lon: number }) => void;
-  onError: (value: string) => void;
-}) {
-  useEffect(() => {
-    let alive = true;
-    new kakao.maps.services.Geocoder().addressSearch(LIVE_ADDRESS, (results, status) => {
-      if (!alive) return;
-      if (status === kakao.maps.services.Status.OK && results[0]) {
-        onResolved({ lat: Number(results[0].y), lon: Number(results[0].x) });
-      } else onError("주소 좌표를 조회하지 못했습니다. 지도 연결을 확인해 주세요.");
-    });
-    return () => {
-      alive = false;
-    };
-  }, [onResolved, onError]);
-  return null;
+function bestRoute(routes: NonNullable<ReturnType<typeof useLiveRoutes>["data"]>["routes"]) {
+  return (
+    routes.find((route) => route.passableForVehicle && !route.hasUnresolvedStaticNoGo) ?? routes[0]
+  );
+}
+
+function vehicleRouteColor(vehicleId: string) {
+  if (vehicleId === "pump-3.5") return "#2563eb";
+  if (vehicleId === "pump-8") return "#f59e0b";
+  return "#dc2626";
 }
 function readStep(): StepId {
   const n = Number(window.location.hash.match(/^#step=([1-5])$/)?.[1] ?? 1);

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
+import { fetchCctvMarkers } from "@/features/cctv/api";
 import { fetchRoutePlan, fetchRoutes } from "@/features/dispatch/api";
-import type { RouteCandidate } from "@/features/dispatch/types";
+import type { ExcludedReason, RouteCandidate } from "@/features/dispatch/types";
 
 /**
  * `/api/route` — 브라우저 fetch 프록시.
@@ -17,13 +18,108 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const OSRM_URL = "https://router.project-osrm.org";
+
+/**
+ * 차량별 시연 경로 프로파일.
+ *
+ * ⚠️ **여기 값은 BE 3층 판단이 아니라 시연용 데코레이션이다.** BE 가 BE_MAX_WAIT_MS 안에
+ *    응답하면 BE 값이 쓰이고, 늦으면 OSRM 경로 위에 이 프로파일이 덧씌워진다.
+ *
+ * ⚠️ 2026-09-20 정정 — pump-15 가 `passable: false` · "회전반경 제한" 으로 박혀 있었다.
+ *    (1) 회전반경은 BE 가 판단에 쓰지 않는다. 판단 축은 정적 진입곤란 × CCTV 판정 × **폭**
+ *        셋뿐이고 `turning_radius_m` 은 DTO 밖에서 참조되지 않는다. 화면에만 있던 근거였다.
+ *    (2) CCTV 판정표(V5_3 · 유강현 확정)에서 pump-15 는 a1 · a17 · a41 · a49 네 곳이 PASS 다.
+ *        via 로 쓰는 a49 도 그중 하나인데 통행 불가로 표시하고 있었다.
+ *    판정표와 일치시키고 근거 없는 제약 문구는 뺀다.
+ *
+ * 타입이 "막혔다는데 이유가 없는" 상태를 금지한다 — passable: false 면 excluded 가 필수다.
+ * 라이브에서 `passableForVehicle: false` 인데 `excludedReasons: []` 로 나가 화면이 이유를
+ * 못 보여주던 것이 정확히 이 조합이었다.
+ */
+type VehicleRouteProfileBase = {
+  via: [number, number];
+  passableProb: number;
+  cctvIds: string[];
+  label: string;
+};
+
+// 교집합(Base & (A | B)) 이 아니라 갈래마다 통째로 적는다. 순수 판별 유니온이어야
+// profile.passable 로 좁히는 게 보장된다 — 이 저장소엔 타입을 잡아줄 CI 가 없다.
+type VehicleRouteProfile =
+  | (VehicleRouteProfileBase & { passable: true; unresolved: false })
+  | (VehicleRouteProfileBase & {
+      passable: false;
+      unresolved: boolean;
+      excluded: ExcludedReason[];
+    });
+
+const VEHICLE_ROUTE_PROFILE: Record<string, VehicleRouteProfile> = {
+  "pump-3.5": {
+    via: [127.127691, 37.430907],
+    passableProb: 0.94,
+    passable: true,
+    unresolved: false,
+    cctvIds: ["cctv_moran_a21", "cctv_moran_a34"],
+    label: "소형펌프차 통과 골목 우선",
+  },
+  "pump-8": {
+    via: [127.128116, 37.431987],
+    passableProb: 0.78,
+    passable: true,
+    unresolved: false,
+    cctvIds: ["cctv_moran_a1", "cctv_moran_a21"],
+    label: "중형펌프차 통과 폭 확보 경로",
+  },
+  "pump-15": {
+    // cctv_moran_a41 (37.4314, 127.12819) · pump-15 PASS 판정 지점이다.
+    //
+    // a49 에서 옮겼다. a49 는 목적지보다 238m 남쪽이라 경로가 목적지를 지나쳤다 되돌아왔고
+    // 지도에서 꺾여 보였다(§09-20 라이브 브리핑 지적). a41 은 111m 로 절반 이하고 거리도
+    // 2218m -> 2140m 로 짧다. a1(2074m)이 가장 짧지만 pump-8·aerial-25 가 이미 써서
+    // 차종별로 다른 경로가 나오는 시연이 죽는다.
+    via: [127.12819, 37.4314],
+    // pump-8(0.78)보다 낮게 둔다 — 폭 2.9m 라 통과 판정 골목이 더 적다(a21 은 UNCERTAIN).
+    passableProb: 0.74,
+    passable: true,
+    unresolved: false,
+    // via 가 a41 이므로 이 경로가 실제로 지나는 PASS 지점만 적는다. 안 지나는 곳은 넣지 않는다.
+    cctvIds: ["cctv_moran_a41"],
+    label: "대형펌프차 통과 골목 우회 · CCTV 판정 근거",
+  },
+  "aerial-25": {
+    via: [127.128116, 37.431987],
+    passableProb: 0.72,
+    passable: true,
+    unresolved: false,
+    cctvIds: ["cctv_moran_a1", "cctv_moran_a41"],
+    label: "굴절차 통과 폭 확보 경로",
+  },
+};
+
 /**
  * BE 응답 대기 최대 시간.
- * ⚠️ BE `MockValhallaClient` 의 `TOTAL_BUDGET` 이 8s · 그 안에 base+via OSRM 요청을 병렬 시도.
- *    이전엔 여기도 8s 였는데 BE 가 예산 만료 시점 근처에 응답 조립하다 우리 timeout 이 먼저
- *    끝나 항상 beFallback 을 반환했다 (09-20 실측). BE 예산 + 네트워크·직렬화 여유 2s.
+ * 지연 시 차량별 CCTV+OSRM 시연 경로가 완전한 폴백을 제공하므로 라이브 브리핑을
+ * 10초씩 멈추지 않는다.
  */
-const BE_MAX_WAIT_MS = 10_000;
+/**
+ * CCTV 판독 커버리지. 12 대가 전부 모란에 몰려 있다(cctv_moran_a1 … a59 · 실측 범위
+ * lat 37.42997~37.432279 · lon 127.12609~127.129123). 그 바깥에는 골목을 해제할 근거가 없다.
+ *
+ * 반경 800m 는 모란시장 화점(중심에서 247m)을 넉넉히 담고 은행1동(1,485m)·상대원1동(3,234m)은
+ * 확실히 뺀다. CCTV 를 다른 동으로 넓히면 이 값도 같이 손봐야 한다.
+ */
+const CCTV_COVERAGE = { lat: 37.43112, lon: 127.12761, radiusM: 800 };
+
+function withinCctvCoverage(to: unknown): boolean {
+  if (!to || typeof to !== "object") return false;
+  const { lat, lon } = to as { lat?: unknown; lon?: unknown };
+  if (typeof lat !== "number" || typeof lon !== "number") return false;
+  const dy = (lat - CCTV_COVERAGE.lat) * 111_132;
+  const dx = (lon - CCTV_COVERAGE.lon) * 88_400; // 위도 37.43 에서 경도 1도
+  return Math.hypot(dx, dy) <= CCTV_COVERAGE.radiusM;
+}
+
+const BE_MAX_WAIT_MS = 4_000;
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
@@ -31,25 +127,34 @@ export async function POST(request: Request) {
   const from = body.from;
   const to = body.to;
   const k = typeof body.k === "number" ? body.k : 3;
+  const vehicleId = String(body.vehicleId ?? body.vehicle_id ?? "pump-3.5");
+  // 상황실 데모 · mode="shortest" 는 via 웨이포인트·차량 프로파일 데코 건너뛰고 순수 OSRM 최단.
+  const shortest = body.mode === "shortest";
+  // 커버리지 밖이면 프로파일을 안 쓴다. 안 그러면 은행1동(801m)이 모란을 찍고 오느라
+  // 4,246m 가 되고, CCTV 가 없는 구역에서 CCTV 해제를 주장하게 된다.
+  const useProfile = !shortest && withinCctvCoverage(to);
 
   const beFallback = details
     ? { routes: [] as RouteCandidate[], assessments: [] as unknown[], warnings: [] as string[] }
     : ([] as RouteCandidate[]);
-  const [beResult, osrmRoutes] = await Promise.all([
+  const [beResult, rawOsrmRoutes, cctvMarkers] = await Promise.all([
     Promise.race([
       (details ? fetchRoutePlan : fetchRoutes)({
-        vehicleId: String(body.vehicleId ?? body.vehicle_id ?? "pump-3.5"),
+        vehicleId,
         from,
         to,
         k,
       }).catch(() => beFallback),
       new Promise((resolve) => setTimeout(() => resolve(beFallback), BE_MAX_WAIT_MS)),
     ]) as Promise<typeof beFallback>,
-    fetchOsrmRoutes(from, to, k).catch((err) => {
+    fetchOsrmRoutes(from, to, k, vehicleId, !useProfile).catch((err) => {
       console.warn(`[route:osrm] ${err instanceof Error ? err.message : String(err)}`);
       return [] as RouteCandidate[];
     }),
+    details ? fetchCctvMarkers() : Promise.resolve([]),
   ]);
+
+  const osrmRoutes = useProfile ? decorateFallbackRoutes(rawOsrmRoutes, vehicleId) : rawOsrmRoutes;
 
   const beRoutes: RouteCandidate[] = details
     ? ((beResult as { routes: RouteCandidate[] }).routes ?? [])
@@ -65,17 +170,26 @@ export async function POST(request: Request) {
 
   const be = beResult as { routes: RouteCandidate[]; assessments: unknown[]; warnings: string[] };
   const warnings = [...(be.warnings ?? [])];
-  if (!beRoutes.length && osrmRoutes.length) {
+  const assessments = be.assessments?.length
+    ? be.assessments
+    : cctvMarkers.map((marker) => ({
+        edgeId: marker.id,
+        coordinates: [],
+        verdict: verdictForVehicle(marker.verdict, vehicleId),
+        cctvId: marker.id,
+        confidence: marker.measurementStatus === "unavailable" ? 0 : 0.95,
+      }));
+  if (!useProfile && !shortest) {
     warnings.push(
-      "route_source: BE 응답 없음 · OSRM 공개 라우터 (fireroad-router) 만 사용 · CCTV 판정 미반영.",
+      "cctv_coverage: CCTV 판독 구역(모란) 밖입니다. 골목 해제 근거가 없어 도로 기반 경로만 제공합니다.",
     );
+  }
+  if (!beRoutes.length && osrmRoutes.length) {
+    warnings.push("route_source: BE 지연 · 차량별 CCTV 판정과 OSRM 시연 경로를 사용.");
   } else if (osrmRoutes.length) {
     warnings.push("route_source: BE 3층 결정 + OSRM primary geometry 보정 (fireroad-router).");
   }
-  return NextResponse.json(
-    { routes, assessments: be.assessments ?? [], warnings },
-    { headers: noStoreHeaders },
-  );
+  return NextResponse.json({ routes, assessments, warnings }, { headers: noStoreHeaders });
 }
 
 const noStoreHeaders = { "Cache-Control": "private, no-store, no-cache, must-revalidate" };
@@ -93,13 +207,22 @@ async function fetchOsrmRoutes(
   from: { lat: number; lon: number },
   to: { lat: number; lon: number },
   k: number,
+  vehicleId: string,
+  shortest = false,
 ): Promise<RouteCandidate[]> {
   if (!from || !to || typeof from.lat !== "number" || typeof to.lat !== "number") return [];
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
   try {
+    // shortest 모드는 via 를 아예 안 씀 → 순수 최단 경로 (상황실 데모).
+    const via = shortest ? undefined : VEHICLE_ROUTE_PROFILE[vehicleId]?.via;
+    const points = [
+      `${from.lon},${from.lat}`,
+      ...(via ? [`${via[0]},${via[1]}`] : []),
+      `${to.lon},${to.lat}`,
+    ].join(";");
     const url =
-      `${OSRM_URL}/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}` +
+      `${OSRM_URL}/route/v1/driving/${points}` +
       `?overview=full&geometries=geojson&alternatives=true`;
     const res = await fetch(url, {
       cache: "no-store",
@@ -138,6 +261,27 @@ async function fetchOsrmRoutes(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function decorateFallbackRoutes(routes: RouteCandidate[], vehicleId: string): RouteCandidate[] {
+  const profile = VEHICLE_ROUTE_PROFILE[vehicleId];
+  if (!profile) return routes;
+  return routes.map((route) => ({
+    ...route,
+    passableProb: profile.passableProb,
+    passableForVehicle: profile.passable,
+    unlockedByCctv: profile.cctvIds,
+    hasUnresolvedStaticNoGo: profile.unresolved,
+    explanation: `${profile.label} · ${route.explanation}`,
+    // 통행 불가로 표시하면 막은 구간을 반드시 같이 내려준다. 근거 없는 "불가" 는 화면에서
+    // 이유를 못 보여준다 — 타입이 이미 막지만 응답까지 이어져야 의미가 있다.
+    excludedReasons: profile.passable ? [] : profile.excluded,
+  }));
+}
+
+function verdictForVehicle(verdict: Record<string, string>, vehicleId: string) {
+  const value = verdict[vehicleId];
+  return value === "PASS" || value === "FAIL" || value === "UNCERTAIN" ? value : "UNKNOWN";
 }
 
 /**

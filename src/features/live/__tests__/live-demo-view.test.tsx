@@ -76,28 +76,22 @@ async function step(n: number) {
   });
 }
 
-test("geocodes the requested address and recalculates for small, medium and large vehicles", async () => {
+test("calculates every vehicle after receipt and uses selection only as a detail filter", async () => {
   render(<LiveDemoView />);
   expect(screen.getByRole("heading", { name: LIVE_ADDRESS })).toBeInTheDocument();
-  await step(3);
-  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
-  expect(JSON.parse((fetch as jest.Mock).mock.calls[0][1].body)).toMatchObject({
-    vehicleId: "pump-3.5",
-    to: { lat: 37.43, lon: 127.13 },
-  });
-  fireEvent.change(screen.getByRole("combobox", { name: "출동 차량" }), {
-    target: { value: "pump-8" },
-  });
-  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-  expect(JSON.parse((fetch as jest.Mock).mock.calls[1][1].body).vehicleId).toBe("pump-8");
-  fireEvent.change(screen.getByRole("combobox", { name: "출동 차량" }), {
+  await step(2);
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+  expect(
+    (fetch as jest.Mock).mock.calls.map((call) => JSON.parse(call[1].body).vehicleId).sort(),
+  ).toEqual(["pump-15", "pump-3.5", "pump-8"]);
+  fireEvent.change(screen.getByRole("combobox", { name: "경로 상세 차량" }), {
     target: { value: "pump-15" },
   });
-  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
-  expect(JSON.parse((fetch as jest.Mock).mock.calls[2][1].body).vehicleId).toBe("pump-15");
   await step(4);
-  expect(await screen.findByText(/추천 경로/)).toBeInTheDocument();
-  expect(screen.getByText(/4분 0초/)).toBeInTheDocument();
+  expect(fetch).toHaveBeenCalledTimes(3);
+  expect(await screen.findByRole("button", { name: /소형 소방차/ })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /중형 소방차/ })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /대형 소방차/ })).toBeInTheDocument();
 });
 
 // ⚠️ 09-19 시연 · 종준님 fffebb4 커밋으로 정책 뒤집혔음 — 통과 가능 후보가 없으면 첫 후보를 "차선책" 으로
@@ -120,24 +114,4 @@ test("shows an error and retries instead of substituting scripted routes", async
   expect(await screen.findByRole("alert")).toHaveTextContent("경로 계산에 실패했습니다");
   fireEvent.click(screen.getByRole("button", { name: "CCTV 판정·경로 다시 조회" }));
   expect(await screen.findByText(/CCTV 통과 1개/)).toBeInTheDocument();
-});
-
-test("a previous vehicle response cannot overwrite the current vehicle", async () => {
-  let resolveSmall!: (value: ReturnType<typeof reply>) => void;
-  (fetch as jest.Mock)
-    .mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          resolveSmall = resolve;
-        }),
-    )
-    .mockResolvedValueOnce(reply([]));
-  render(<LiveDemoView />);
-  await step(4);
-  fireEvent.change(screen.getByRole("combobox", { name: "출동 차량" }), {
-    target: { value: "pump-15" },
-  });
-  expect(await screen.findByText(/통행 가능한 경로를 찾지 못했습니다/)).toBeInTheDocument();
-  await act(async () => resolveSmall(reply()));
-  expect(screen.queryByText(/추천 경로/)).not.toBeInTheDocument();
 });
