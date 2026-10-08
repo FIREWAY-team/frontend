@@ -3,6 +3,11 @@
 import { AlertOctagon, Building2, Clock, Phone, Ruler, User } from "lucide-react";
 import { useRouter } from "next/navigation";
 
+import {
+  VEHICLE_COLOR,
+  VEHICLE_SHORT,
+  vehiclesForSeverity,
+} from "@/features/live/briefing-constants";
 import type { Scenario } from "@/features/scenarios/types";
 import { cn } from "@/lib/utils";
 
@@ -69,6 +74,22 @@ export function IncidentCard({ incident }: IncidentCardProps) {
       <div className="flex flex-col gap-0.5">
         <div className="text-foreground text-[14px] font-semibold">{incident.title}</div>
         <div className="text-muted-foreground text-[11px]">{incident.address}</div>
+      </div>
+
+      {/* 배정 예정 차량 chip · 규모만으론 몇 대 출동인지 혼동되어 추가 (§#50) */}
+      <div className="flex flex-wrap gap-1">
+        {vehiclesForSeverity(severity).map((vid) => (
+          <span
+            key={vid}
+            className="border-border bg-background text-foreground inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-medium"
+          >
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ backgroundColor: VEHICLE_COLOR[vid] ?? "#64748b" }}
+            />
+            {VEHICLE_SHORT[vid] ?? vid}
+          </span>
+        ))}
       </div>
 
       {/* 상세 정보 */}
