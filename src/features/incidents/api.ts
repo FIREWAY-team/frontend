@@ -87,6 +87,22 @@ export async function listIncidents(status?: IncidentStatus): Promise<Incident[]
 }
 
 /**
+ * `PATCH /api/incidents/{incidentNo}/status` · 상태 전이 (BE #41).
+ * ⚠️ 서버가 전이 규칙을 강제 · 되돌리기 / 종결·취소 뒤 변경 / 동시 변경 → 409.
+ * ⚠️ 종결·취소 시 BE 가 `closed_at` 을 찍어 돌려준다.
+ */
+export async function patchIncidentStatus(
+  incidentNo: string,
+  status: IncidentStatus,
+): Promise<Incident | null> {
+  const raw = await be<BeIncident>(`/api/incidents/${encodeURIComponent(incidentNo)}/status`, {
+    method: "PATCH",
+    body: { status },
+  });
+  return raw ? toIncident(raw) : null;
+}
+
+/**
  * `POST /api/incidents/{no}/routes` · 경로 산출 + 저장.
  * ⚠️ 같은 신고에 다시 호출하면 이전 결과가 통째로 대체된다 (BE #34 계약).
  * ⚠️ Valhalla + no-go 조합이라 10초 timeout — 다른 fetch 보다 여유.

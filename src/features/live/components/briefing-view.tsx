@@ -8,9 +8,12 @@ import { MapMarker, Polyline } from "react-kakao-maps-sdk";
 import { KakaoCanvas } from "@/components/map/kakao-canvas";
 import { FIRE_STATION } from "@/features/dispatch/hooks/use-backend-routes";
 import type { RouteCandidate } from "@/features/dispatch/types";
+import a21OverlayJson from "@/features/live/fixtures/a21-overlay.json";
 import { TEST_INCIDENT_POOL } from "@/features/scenarios/intake-overrides";
 import type { Scenario } from "@/features/scenarios/types";
 import { cn } from "@/lib/utils";
+
+const A21_OVERLAY = a21OverlayJson as unknown as A21Overlay;
 
 import {
   ANIMATION_TICK_MS,
@@ -64,12 +67,14 @@ export function BriefingView({ incidents }: BriefingViewProps) {
 
 function BriefingContent({ incident }: { incident: Scenario }) {
   const router = useRouter();
-  const [routeData, setRouteData] = useState<RouteCandidate | null>(null);
+  // ⚠️ **차량별 라우팅은 BFF 프로파일이 처리** (§#54) · 차량마다 /api/route 를 Promise.all 로
+  //    병렬 호출. BFF `VEHICLE_ROUTE_PROFILE` 이 소형 a21 · 대형 a41·a1 경유지로 OSRM 실도로
+  //    경로를 뽑아주므로 각 차량은 서로 다른 polyline 을 받는다.
+  const [routesByVehicle, setRoutesByVehicle] = useState<Record<string, RouteCandidate | null>>({});
   const [routeLoading, setRouteLoading] = useState(true);
   const [dispatched, setDispatched] = useState(false);
   const [progress, setProgress] = useState(0); // 0~1
   const [rerouteFired, setRerouteFired] = useState(false);
-  const [reroutedPath, setReroutedPath] = useState<Array<[number, number]> | null>(null);
   const [viewTab, setViewTab] = useState<ViewTab>("all");
 
   const assignedVehicles = useMemo(
@@ -77,32 +82,37 @@ function BriefingContent({ incident }: { incident: Scenario }) {
     [incident.intake?.severity],
   );
 
-  // 1. 경로 조회 · incident 이 바뀔 때마다 재조회 (가장 큰 차량 기준으로 한 번만 호출)
+  // 1. 차량별 경로 병렬 조회 · Promise.all 로 동시에 보내 1회 호출과 응답 시간 거의 같다.
   //    ⚠️ setState 를 effect 안에서 직접 호출하지 않도록 microtask 로 밀어낸다
   useEffect(() => {
     let alive = true;
-    const biggest = assignedVehicles[assignedVehicles.length - 1] ?? "pump-3.5";
     void Promise.resolve().then(async () => {
       if (!alive) return;
       setRouteLoading(true);
-      setRouteData(null);
+      setRoutesByVehicle({});
       try {
-        const res = await fetch("/api/route", {
-          method: "POST",
-          cache: "no-store",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            vehicleId: biggest,
-            from: FIRE_STATION,
-            to: incident.location,
-            k: 1,
+        const results = await Promise.all(
+          assignedVehicles.map(async (vid) => {
+            const res = await fetch("/api/route", {
+              method: "POST",
+              cache: "no-store",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                vehicleId: vid,
+                from: FIRE_STATION,
+                to: incident.location,
+                k: 1,
+              }),
+            });
+            if (!res.ok) return [vid, null] as const;
+            const list = (await res.json()) as RouteCandidate[];
+            return [vid, list[0] ?? null] as const;
           }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const list = (await res.json()) as RouteCandidate[];
-        if (alive) setRouteData(list[0] ?? null);
+        );
+        if (!alive) return;
+        setRoutesByVehicle(Object.fromEntries(results));
       } catch {
-        if (alive) setRouteData(null);
+        if (alive) setRoutesByVehicle({});
       } finally {
         if (alive) setRouteLoading(false);
       }
@@ -112,33 +122,61 @@ function BriefingContent({ incident }: { incident: Scenario }) {
     };
   }, [incident, assignedVehicles]);
 
-  // 2. 재탐색 trigger · 대형 포함되고 · 애니메이션 40% 지점 지나면 1회
-  //    ⚠️ setState 를 effect 안에서 직접 호출하지 않도록 microtask 로 밀어낸다
-  //       (§ react-hooks/set-state-in-effect 규칙)
+  // 적어도 하나의 route 가 로드됐는지 (헤더·사이드바 분기용)
+  const anyRouteLoaded = useMemo(
+    () => Object.values(routesByVehicle).some((r) => r !== null),
+    [routesByVehicle],
+  );
+
+  // 소형·대형 공통 접두사 (갈라지는 지점 index) · Remotion live.json 의 commonPrefix 와 동치 (§C7).
+  // BFF 가 vehicle profile via 를 다르게 주지만 OSRM 응답 앞부분은 보통 완전히 같은 좌표라
+  // 자동으로 계산할 수 있다. 두 경로 중 짧은 쪽 길이까지 1:1 매칭. 좌표 비교는 소수점 그대로.
+  const commonPrefix = useMemo(() => {
+    const s = routesByVehicle["pump-3.5"]?.coordinates;
+    const l = routesByVehicle["pump-15"]?.coordinates;
+    if (!s || !l) return 0;
+    const n = Math.min(s.length, l.length);
+    let i = 0;
+    while (i < n && s[i]![0] === l[i]![0] && s[i]![1] === l[i]![1]) i++;
+    return i;
+  }, [routesByVehicle]);
+
+  // 2. 재탐색 trigger · 대형 포함되고 · 애니메이션 40% 지점 지나면 1회 발동 (§C7).
+  //    Remotion 방식 · 좌표 shift 트릭 제거 · reroute 플래그만 세우고 polyline 레이어가
+  //    공통 접두사·공유 꼬리·대형 자기 경로를 알아서 그린다 (Deathmatch.tsx 패턴).
   useEffect(() => {
-    if (!dispatched || rerouteFired || !routeData) return;
+    if (!dispatched || rerouteFired) return;
     if (!assignedVehicles.includes("pump-15")) return;
     if (progress < REROUTE_TRIGGER_RATIO) return;
-    const original = routeData.coordinates;
-    if (original.length < 4) return;
-    const mid = Math.floor(original.length / 2);
-    const detour: Array<[number, number]> = original.map(([lon, lat], i) => {
-      if (i >= mid - 1 && i <= mid + 2) {
-        return [lon + 0.0012, lat + 0.0008]; // 북동쪽으로 살짝 우회
-      }
-      return [lon, lat];
-    });
+    if (!routesByVehicle["pump-15"] || !routesByVehicle["pump-3.5"]) return;
     void Promise.resolve().then(() => {
       setRerouteFired(true);
-      setReroutedPath(detour);
     });
-  }, [progress, dispatched, rerouteFired, routeData, assignedVehicles]);
+  }, [progress, dispatched, rerouteFired, routesByVehicle, assignedVehicles]);
 
-  // 3. 애니메이션 tick
+  // 3. 애니메이션 tick + BE 상태 전이 (§D7)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startDispatch = useCallback(() => {
-    if (dispatched || !routeData) return;
+    if (dispatched || !anyRouteLoaded) return;
     setDispatched(true);
+
+    // 백그라운드로 BE 에 DISPATCHED 전이 (§D7). 실패해도 UI 애니메이션은 그대로 진행.
+    // BE 가 scenarios mock 상태면 404 가 뜰 수 있으므로 조용히 삼킨다.
+    if (incident.id) {
+      void (async () => {
+        try {
+          await fetch(`/api/incidents/${encodeURIComponent(incident.id)}/status`, {
+            method: "PATCH",
+            cache: "no-store",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "DISPATCHED" }),
+          });
+        } catch {
+          /* 조용히 폴백 · 녹화 중 실패해도 애니메이션은 그대로 돈다 */
+        }
+      })();
+    }
+
     const started = Date.now();
     timerRef.current = setInterval(() => {
       const elapsed = Date.now() - started;
@@ -149,7 +187,7 @@ function BriefingContent({ incident }: { incident: Scenario }) {
         timerRef.current = null;
       }
     }, ANIMATION_TICK_MS);
-  }, [dispatched, routeData]);
+  }, [dispatched, anyRouteLoaded, incident.id]);
 
   useEffect(
     () => () => {
@@ -158,26 +196,21 @@ function BriefingContent({ incident }: { incident: Scenario }) {
     [],
   );
 
-  // 재탐색 발생 후 대형 펌프차의 "진행 비율" 을 원본보다 느리게 (우회로 시간 더 걸림)
-  // 시각적 효과 · 다른 차량은 원본 경로 그대로
-  // ⚠️ 차량별 polyline 이 완전히 겹쳐 1 색만 보이던 문제 (§#50) 해결 · 각 차량 경로를
-  //    lat 방향으로 ~9m 평행 오프셋 → 지도에서 3 차선처럼 나란히 보인다. 마커도 같은
-  //    오프셋을 받아야 폴리라인 위에 올라앉는다.
+  // 차량별 위치 샘플링 · 각 차량이 자기 polyline 위를 progress 비율대로 이동.
+  // 공유 접두사 구간에서는 소형·대형 좌표가 거의 동일하므로 시각적으로 함께 가는 것처럼
+  // 보이고, 분기점 넘으면 자동으로 분리된다 (Remotion Deathmatch 와 동일 방식).
   const vehiclePositions = useMemo(() => {
-    if (!routeData) return [] as Array<{ id: string; lat: number; lon: number }>;
     const result: Array<{ id: string; lat: number; lon: number }> = [];
     for (const vid of assignedVehicles) {
-      // 차량별로 약간 다른 progress 시뮬레이션 · 소형이 가장 빠르다는 가정
+      const route = routesByVehicle[vid];
+      if (!route) continue;
       const speedBias = vid === "pump-3.5" ? 1.08 : vid === "pump-8" ? 1.0 : 0.92;
       const effectiveProgress = Math.min(1, progress * speedBias);
-      const base = vid === "pump-15" && reroutedPath ? reroutedPath : routeData.coordinates;
-      const idx = assignedVehicles.indexOf(vid);
-      const path = offsetPath(base, idx, assignedVehicles.length);
-      const pt = sampleAlongPath(path, effectiveProgress);
+      const pt = sampleAlongPath(route.coordinates, effectiveProgress);
       if (pt) result.push({ id: vid, lat: pt[1], lon: pt[0] });
     }
     return result;
-  }, [routeData, progress, reroutedPath, assignedVehicles]);
+  }, [routesByVehicle, progress, assignedVehicles]);
 
   // 도착 100m 이내 차량 (CCTV 자동 노출용)
   const nearArrival = useMemo(() => {
@@ -250,23 +283,24 @@ function BriefingContent({ incident }: { incident: Scenario }) {
             position={{ lat: incident.location.lat, lng: incident.location.lon }}
             title={incident.title}
           />
-          {/* 메인 경로 polyline (차량별 색상 · lat 오프셋으로 평행선처럼 분리 §#50) */}
-          {routeData &&
-            visibleVehicles.map((vid) => {
-              const base = vid === "pump-15" && reroutedPath ? reroutedPath : routeData.coordinates;
-              const offsetIdx = assignedVehicles.indexOf(vid);
-              const path = offsetPath(base, offsetIdx, assignedVehicles.length);
-              return (
-                <Polyline
-                  key={vid}
-                  path={path.map(([lon, lat]) => ({ lat, lng: lon }))}
-                  strokeWeight={5}
-                  strokeColor={VEHICLE_COLOR[vid] ?? "#64748b"}
-                  strokeOpacity={0.9}
-                  strokeStyle={vid === "pump-15" && reroutedPath ? "dash" : "solid"}
-                />
-              );
-            })}
+          {/* 메인 경로 polyline (§C7 Remotion Deathmatch 패턴).
+              재탐색 전: 소형 경로 하나만 그린다 (대형이 그 위에 있는 것처럼).
+              재탐색 후: 소형 꼬리 회색 점선 (대형이 못 가는 길) + 소형 전체 파랑 + 대형 전체 빨강. */}
+          {!rerouteFired &&
+            // 재탐색 전 · 소형 polyline 만 (두 차량 공유 중). visibleVehicles 가 소형을 포함할 때만.
+            (visibleVehicles.includes("pump-3.5") && routesByVehicle["pump-3.5"] ? (
+              <Polyline
+                path={routesByVehicle["pump-3.5"]!.coordinates.map(([lon, lat]) => ({
+                  lat,
+                  lng: lon,
+                }))}
+                strokeWeight={5}
+                strokeColor={VEHICLE_COLOR["pump-3.5"]}
+                strokeOpacity={0.9}
+                strokeStyle="solid"
+              />
+            ) : null)}
+          {rerouteFired && renderReroutePolylines(routesByVehicle, visibleVehicles, commonPrefix)}
           {/* 차량 Marker · 출동 후 애니메이션 중 */}
           {dispatched &&
             vehiclePositions
@@ -285,19 +319,21 @@ function BriefingContent({ incident }: { incident: Scenario }) {
               ))}
         </KakaoCanvas>
 
-        {/* 좌측 하단 · 재탐색 알림 토스트 */}
+        {/* 좌측 하단 · 재탐색 알림 토스트 (§C8) */}
         {rerouteFired && (
           <div className="animate-fade-in absolute bottom-6 left-6 z-10 flex items-start gap-2 rounded-md border border-amber-400 bg-amber-50 px-3 py-2 text-amber-900 shadow-lg dark:bg-amber-950 dark:text-amber-200">
             <AlertTriangle size={16} strokeWidth={2} className="mt-0.5 shrink-0" />
             <div className="text-[12px] leading-tight">
-              <div className="font-semibold">대형 소방차 재탐색</div>
-              <div>중간 지점 CCTV 가 통행 불가 감지 · 새 경로 안내 중</div>
+              <div className="font-semibold">대형 소방차 재탐색 · A41 경유</div>
+              <div>A21 골목 CCTV 통행 불확실 감지 · 북쪽 큰길로 우회 진입</div>
             </div>
           </div>
         )}
 
-        {/* 100m 전 CCTV 영상 패널 · 특정 차량 선택 뷰에서만 */}
-        {viewTab !== "all" && nearArrival.includes(viewTab) && incident.id && (
+        {/* 재탐색 중 A21 CCTV 판독 패널 (§C9) · 왜 재탐색이 뜨는지 눈으로 확인용 */}
+        {rerouteFired && progress < 1 && <RerouteCctvPanel overlay={A21_OVERLAY} />}
+        {/* 100m 전 CCTV 영상 패널 · 재탐색 중이 아닐 때만 */}
+        {!rerouteFired && viewTab !== "all" && nearArrival.includes(viewTab) && incident.id && (
           <ArrivalCctvPanel incidentId={incident.id} vehicleId={viewTab} />
         )}
 
@@ -305,7 +341,7 @@ function BriefingContent({ incident }: { incident: Scenario }) {
         <aside className="border-border bg-surface/95 absolute top-4 right-4 bottom-4 z-10 w-80 overflow-y-auto rounded-lg border p-4 shadow-xl backdrop-blur">
           <BriefingSidebar
             incident={incident}
-            routeData={routeData}
+            routesByVehicle={routesByVehicle}
             routeLoading={routeLoading}
             assignedVehicles={assignedVehicles}
             dispatched={dispatched}
@@ -322,7 +358,7 @@ function BriefingContent({ incident }: { incident: Scenario }) {
 
 function BriefingSidebar({
   incident,
-  routeData,
+  routesByVehicle,
   routeLoading,
   assignedVehicles,
   dispatched,
@@ -330,13 +366,23 @@ function BriefingSidebar({
   onDispatch,
 }: {
   incident: Scenario;
-  routeData: RouteCandidate | null;
+  routesByVehicle: Record<string, RouteCandidate | null>;
   routeLoading: boolean;
   assignedVehicles: string[];
   dispatched: boolean;
   progress: number;
   onDispatch: () => void;
 }) {
+  const anyRoute = assignedVehicles.some((vid) => routesByVehicle[vid]);
+  // 첫 번째 로드된 route 의 explanation 을 공통 근거로 노출 (차량별로 거의 동일)
+  const primaryExplanation = useMemo(() => {
+    for (const vid of assignedVehicles) {
+      const r = routesByVehicle[vid];
+      if (r?.explanation) return r.explanation;
+    }
+    return "";
+  }, [routesByVehicle, assignedVehicles]);
+
   return (
     <div className="flex flex-col gap-3">
       <header className="flex flex-col gap-1">
@@ -350,38 +396,42 @@ function BriefingSidebar({
         <p className="text-muted-foreground py-3 text-[12px]">AI 분석 중 · 경로 조회…</p>
       )}
 
-      {!routeLoading && !routeData && (
+      {!routeLoading && !anyRoute && (
         <p className="text-danger text-[12px]">
           경로를 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.
         </p>
       )}
 
-      {routeData && (
+      {anyRoute && (
         <>
           <section className="flex flex-col gap-1.5">
             <div className="text-muted-foreground text-[10.5px] tracking-widest uppercase">
               배정 차량 ({assignedVehicles.length}대)
             </div>
-            {assignedVehicles.map((vid) => (
-              <div
-                key={vid}
-                className="border-border bg-background flex items-center justify-between gap-2 rounded border px-2.5 py-1.5"
-              >
-                <div className="flex items-center gap-2">
-                  <span
-                    className="h-2.5 w-2.5 rounded-full"
-                    style={{ backgroundColor: VEHICLE_COLOR[vid] }}
-                  />
-                  <span className="text-foreground text-[12px] font-medium">
-                    {VEHICLE_LABEL[vid] ?? vid}
-                  </span>
+            {assignedVehicles.map((vid) => {
+              const route = routesByVehicle[vid];
+              return (
+                <div
+                  key={vid}
+                  className="border-border bg-background flex items-center justify-between gap-2 rounded border px-2.5 py-1.5"
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: VEHICLE_COLOR[vid] }}
+                    />
+                    <span className="text-foreground text-[12px] font-medium">
+                      {VEHICLE_LABEL[vid] ?? vid}
+                    </span>
+                  </div>
+                  <div className="text-muted-foreground text-[10.5px]">
+                    {route
+                      ? `${Math.floor(route.etaSec / 60)}분 ${route.etaSec % 60}초 · ${(route.distanceM / 1000).toFixed(2)}km`
+                      : "경로 없음"}
+                  </div>
                 </div>
-                <div className="text-muted-foreground text-[10.5px]">
-                  {Math.floor(routeData.etaSec / 60)}분 {routeData.etaSec % 60}초 ·{" "}
-                  {(routeData.distanceM / 1000).toFixed(2)}km
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </section>
 
           {!dispatched ? (
@@ -414,9 +464,9 @@ function BriefingSidebar({
             </section>
           )}
 
-          {routeData.explanation && (
+          {primaryExplanation && (
             <div className="text-muted-foreground border-border/60 border-t pt-2 text-[11px]">
-              {routeData.explanation}
+              {primaryExplanation}
             </div>
           )}
         </>
@@ -454,6 +504,130 @@ function ArrivalCctvPanel({ incidentId, vehicleId }: { incidentId: string; vehic
       <p className="text-muted-foreground text-[10.5px]">
         도착 100m 이내 · 주차 공간 사전 파악용 · 사건번호 {incidentId}
       </p>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
+// 재탐색 CCTV overlay 패널 (§C9) · Remotion a21_overlay.json 그대로 사용
+
+type A21Mask = { name: string; conf: number; poly: Array<[number, number]> };
+type A21Ground = { y: number; wallL: number; wallR: number; obstacle: [number, number] };
+type A21Reading = {
+  cctvId: string;
+  wallWidthM: number;
+  obstacleWidthM: number;
+  effectiveWidthM: number;
+  verdict: Record<string, string>;
+};
+type A21Overlay = {
+  frame: string;
+  size: [number, number];
+  masks: A21Mask[];
+  ground: A21Ground;
+  reading: A21Reading;
+};
+
+/**
+ * 재탐색 발동 중 노출되는 A21 CCTV 판독 패널 (§C9).
+ *
+ * BE 팀장이 넘긴 overlay (`src/features/live/fixtures/a21-overlay.json`) 를 SVG 로 겹쳐 그려
+ * 심사원이 왜 재탐색이 뜨는지 (= 좁은 골목 + 적치물) 를 눈으로 확인할 수 있게 한다.
+ * 영상 작업자가 Remotion v2 에서 쓰던 포맷과 동일.
+ */
+function RerouteCctvPanel({ overlay }: { overlay: A21Overlay }) {
+  const [w, h] = overlay.size;
+  const r = overlay.reading;
+  return (
+    <div className="border-border bg-surface absolute bottom-4 left-4 z-10 flex w-80 flex-col gap-2 rounded-lg border p-2.5 shadow-xl">
+      <div className="flex items-center justify-between gap-1.5">
+        <div className="flex items-center gap-1.5">
+          <Camera size={13} strokeWidth={2} className="text-amber-500" />
+          <div className="text-foreground text-[12px] font-semibold">A21 골목 CCTV · 판독 중</div>
+        </div>
+        <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+          UNCERTAIN
+        </span>
+      </div>
+      <div className="relative aspect-video overflow-hidden rounded bg-black">
+        {/* 기준 프레임 (a21_f05.jpg) · 마스크·측정선이 이 프레임 기준으로 찍혔다 */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/recording-fixtures/cctv/a21_f05.jpg"
+          alt="A21 CCTV 판독 프레임"
+          className="h-full w-full object-cover"
+        />
+        <svg
+          viewBox={`0 0 ${w} ${h}`}
+          preserveAspectRatio="xMidYMid slice"
+          className="absolute inset-0 h-full w-full"
+          aria-hidden
+        >
+          {/* 벽 ~ 벽 수평 측정선 */}
+          <line
+            x1={overlay.ground.wallL}
+            x2={overlay.ground.wallR}
+            y1={overlay.ground.y}
+            y2={overlay.ground.y}
+            stroke="#eab308"
+            strokeWidth={4}
+            strokeDasharray="12 8"
+          />
+          {/* 적치물 수평 측정선 */}
+          <line
+            x1={overlay.ground.obstacle[0]}
+            x2={overlay.ground.obstacle[1]}
+            y1={overlay.ground.y - 10}
+            y2={overlay.ground.y - 10}
+            stroke="#ef4444"
+            strokeWidth={5}
+          />
+          {/* 차 마스크 polygon */}
+          {overlay.masks.map((m, i) => (
+            <polygon
+              key={`${m.name}-${i}`}
+              points={m.poly.map(([x, y]) => `${x},${y}`).join(" ")}
+              fill="#ef4444"
+              fillOpacity={0.28}
+              stroke="#ef4444"
+              strokeWidth={2}
+            />
+          ))}
+        </svg>
+      </div>
+      <div className="flex flex-col gap-0.5 text-[10.5px]">
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">벽 ~ 벽</span>
+          <span className="text-foreground font-medium">{r.wallWidthM.toFixed(2)}m</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">적치물</span>
+          <span className="text-foreground font-medium">{r.obstacleWidthM.toFixed(2)}m</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-foreground font-semibold">유효 통행폭</span>
+          <span className="font-bold text-amber-600 dark:text-amber-400">
+            {r.effectiveWidthM.toFixed(2)}m
+          </span>
+        </div>
+      </div>
+      <div className="border-border/60 flex flex-wrap gap-1 border-t pt-1.5">
+        {Object.entries(r.verdict).map(([vid, status]) => (
+          <span
+            key={vid}
+            className={cn(
+              "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold",
+              status === "PASS"
+                ? "bg-primary/15 text-primary"
+                : status === "FAIL"
+                  ? "bg-danger/20 text-danger"
+                  : "bg-amber-500/20 text-amber-600 dark:text-amber-400",
+            )}
+          >
+            {VEHICLE_SHORT[vid] ?? vid} · {status}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -510,25 +684,61 @@ function EmptyState({ onBack }: { onBack: () => void }) {
 // 유틸
 
 /**
- * 차량별 polyline 평행 오프셋 (§#50).
+ * 재탐색 발동 후 polyline 레이어 (§C7 Deathmatch 패턴).
  *
- * BE 가 아직 차량별 라우팅을 돌려주지 않아 FE 가 단일 경로를 공유해 색상만 다르게 그리는데,
- * 좌표가 완전히 같으면 가장 위에 그려진 색만 보인다. lat 를 미세하게 평행 이동해 지도에서
- * 3 차선처럼 나란히 보이게 한다.
+ * 아래부터 순서대로:
+ *  1. 소형 꼬리 (`small.slice(PREFIX-1)`) — 회색 점선 · 대형이 못 가는 공유 분기 이후 구간
+ *  2. 대형 전체 (`large`) — 빨강 · 공유 접두사 + 대형 자기 경로
+ *  3. 소형 전체 (`small`) — 파랑 · 공유 접두사 위에 올라가 "통행 가능" 느낌을 덮어씀
  *
- * 지도 레벨 5 (약 500m 가시 폭) 기준 ~9m 간격이 가장 자연스러움 — 더 크게 하면 경로가
- * 실제 도로를 벗어나 보인다. true-perpendicular 가 아니라 단순 lat 평행 이동이지만
- * 심사 영상 축척에서는 평행선처럼 보여 충분하다.
+ * visibleVehicles 가 특정 차량만 포함하면 그 차량 관련 레이어만 보인다 (탭 전환 대응).
  */
-function offsetPath(
-  path: Array<[number, number]>,
-  index: number,
-  total: number,
-): Array<[number, number]> {
-  if (total <= 1) return path;
-  const BASE_OFFSET_DEG = 0.00008; // 약 9m
-  const shift = (index - (total - 1) / 2) * BASE_OFFSET_DEG;
-  return path.map(([lon, lat]) => [lon, lat + shift]);
+function renderReroutePolylines(
+  routes: Record<string, RouteCandidate | null>,
+  visible: string[],
+  prefix: number,
+): React.ReactNode {
+  const small = routes["pump-3.5"]?.coordinates;
+  const large = routes["pump-15"]?.coordinates;
+  if (!small || !large) return null;
+  const safePrefix = Math.max(1, Math.min(prefix, small.length, large.length));
+  const blockedTail = small.slice(safePrefix - 1);
+  const showSmall = visible.includes("pump-3.5");
+  const showLarge = visible.includes("pump-15");
+  return (
+    <>
+      {/* 1. 소형 꼬리 회색 점선 (대형 입장에서 '막힌 길' 표시) · 대형 뷰에서만 */}
+      {showLarge && blockedTail.length > 1 && (
+        <Polyline
+          path={blockedTail.map(([lon, lat]) => ({ lat, lng: lon }))}
+          strokeWeight={6}
+          strokeColor="#9ca3af"
+          strokeOpacity={0.85}
+          strokeStyle="shortdash"
+        />
+      )}
+      {/* 2. 대형 전체 (빨강) */}
+      {showLarge && (
+        <Polyline
+          path={large.map(([lon, lat]) => ({ lat, lng: lon }))}
+          strokeWeight={5}
+          strokeColor={VEHICLE_COLOR["pump-15"]}
+          strokeOpacity={0.9}
+          strokeStyle="solid"
+        />
+      )}
+      {/* 3. 소형 전체 (파랑) · 공유 접두사 위에 덮여서 그 구간은 파랑으로 보임 */}
+      {showSmall && (
+        <Polyline
+          path={small.map(([lon, lat]) => ({ lat, lng: lon }))}
+          strokeWeight={5}
+          strokeColor={VEHICLE_COLOR["pump-3.5"]}
+          strokeOpacity={0.9}
+          strokeStyle="solid"
+        />
+      )}
+    </>
+  );
 }
 
 function sampleAlongPath(path: Array<[number, number]>, t: number): [number, number] | null {

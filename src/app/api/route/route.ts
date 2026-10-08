@@ -4,6 +4,8 @@ import { fetchCctvMarkers } from "@/features/cctv/api";
 import { fetchRoutePlan, fetchRoutes } from "@/features/dispatch/api";
 import type { ExcludedReason, RouteCandidate } from "@/features/dispatch/types";
 
+import { isMoranShootDest, MORAN_SNAPSHOTS } from "./fixtures/moran-snapshots";
+
 /**
  * `/api/route` — 브라우저 fetch 프록시.
  *
@@ -154,15 +156,28 @@ export async function POST(request: Request) {
     details ? fetchCctvMarkers() : Promise.resolve([]),
   ]);
 
-  const osrmRoutes = useProfile ? decorateFallbackRoutes(rawOsrmRoutes, vehicleId) : rawOsrmRoutes;
+  // OSRM 공개 서버 장애 폴백 · 모란 시연 좌표면 녹화용 스냅샷으로 대체 (§#56).
+  // decorateFallbackRoutes 가 label 을 또 덮지 않도록 스냅샷 자체가 완성된 응답.
+  const osrmBase =
+    rawOsrmRoutes.length === 0 && useProfile && isMoranShootDest(to)
+      ? (MORAN_SNAPSHOTS[vehicleId] ?? [])
+      : rawOsrmRoutes;
+  const osrmFromSnapshot = osrmBase !== rawOsrmRoutes;
+  const osrmRoutes =
+    useProfile && !osrmFromSnapshot ? decorateFallbackRoutes(osrmBase, vehicleId) : osrmBase;
 
   const beRoutes: RouteCandidate[] = details
     ? ((beResult as { routes: RouteCandidate[] }).routes ?? [])
     : (beResult as RouteCandidate[]);
 
-  // BE 가 후보를 하나라도 줬으면 BE 를 소스로 · OSRM 은 primary geometry 만 얹는다.
-  // 두 쪽 다 비면 빈 배열. BE 만 있으면 BE 그대로. OSRM 만 있으면 OSRM 그대로.
-  const routes = beRoutes.length ? overlayPrimaryGeometry(beRoutes, osrmRoutes) : osrmRoutes;
+  // 녹화 결정론 (§#56 B5) · useProfile 안쪽 (= 모란 커버리지) 에서는 BE 응답을 무시한다.
+  // 지금 BE 가 느려서 우연히 OSRM 프로파일 결과가 쓰이고 있는 상태인데, BE 가 빨라지면
+  // '통과 불가' 가 섞여 녹화 재현성이 깨짐. 커버리지 밖은 종전과 동일.
+  const routes = useProfile
+    ? osrmRoutes
+    : beRoutes.length
+      ? overlayPrimaryGeometry(beRoutes, osrmRoutes)
+      : osrmRoutes;
 
   if (!details) {
     return NextResponse.json(routes, { headers: noStoreHeaders });
@@ -184,7 +199,13 @@ export async function POST(request: Request) {
       "cctv_coverage: CCTV 판독 구역(모란) 밖입니다. 골목 해제 근거가 없어 도로 기반 경로만 제공합니다.",
     );
   }
-  if (!beRoutes.length && osrmRoutes.length) {
+  if (useProfile && osrmFromSnapshot) {
+    warnings.push("route_source: OSRM 장애 폴백 · 모란 시연 좌표 녹화용 스냅샷 (§#56).");
+  } else if (useProfile) {
+    warnings.push(
+      "route_source: 녹화 결정론 (§#56 B5) · 모란 커버리지 안쪽은 BE 응답 무시 · OSRM 프로파일 고정.",
+    );
+  } else if (!beRoutes.length && osrmRoutes.length) {
     warnings.push("route_source: BE 지연 · 차량별 CCTV 판정과 OSRM 시연 경로를 사용.");
   } else if (osrmRoutes.length) {
     warnings.push("route_source: BE 3층 결정 + OSRM primary geometry 보정 (fireroad-router).");

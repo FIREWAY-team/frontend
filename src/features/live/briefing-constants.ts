@@ -3,8 +3,9 @@
  *
  * ⚠️ **차량별 색상 (Q4 확정 2026-10-08)** · 소형 파랑 · 중형 노랑 · 대형 빨강.
  * ⚠️ **애니메이션 1분 기준** · 심사 데모 영상 60초 안에 전체 흐름이 들어가야 함.
- * ⚠️ **BE 가 여러 차량별 라우팅을 아직 못 돌려줌** · 단일 route 를 공유하고 차량별로 Marker
- *    위치를 다르게 두는 방식으로 임시 시각화.
+ * ⚠️ **차량별 라우팅은 BFF `VEHICLE_ROUTE_PROFILE` 이 처리** (§#54 BE 팀장 2026-10-08).
+ *    차량마다 `/api/route` 를 Promise.all 로 병렬 호출하면 서로 다른 OSRM 경로가 나온다.
+ * ⚠️ **중형·대형이 같은 길** (BE 확인 · a1·a41 이 같은 도로 위) · large 는 2대 (소형+대형).
  */
 
 export const VEHICLE_COLOR: Record<string, string> = {
@@ -28,10 +29,15 @@ export const VEHICLE_SHORT: Record<string, string> = {
   "aerial-25": "굴절",
 };
 
-/** 신고 규모별 출동 차량 조합. */
+/**
+ * 신고 규모별 출동 차량 조합.
+ *
+ * ⚠️ **large 는 소형+대형 2대** (§#54) · 중형·대형이 같은 길이라 중형 제외.
+ * ⚠️ medium·small 은 당분간 소형 1대 · 녹화 시나리오는 모란 (large) 하나.
+ */
 export function vehiclesForSeverity(severity: "small" | "medium" | "large" | undefined): string[] {
-  if (severity === "large") return ["pump-3.5", "pump-8", "pump-15"];
-  if (severity === "medium") return ["pump-3.5", "pump-8"];
+  if (severity === "large") return ["pump-3.5", "pump-15"];
+  if (severity === "medium") return ["pump-3.5", "pump-15"];
   return ["pump-3.5"];
 }
 

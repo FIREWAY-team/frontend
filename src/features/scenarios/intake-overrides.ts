@@ -35,7 +35,7 @@ const INTAKE_BY_ID: Record<string, ScenarioIntake> = {
     reporterName: "이OO (인근 상인)",
     reporterPhone: "010-****-2914",
     reportedAt: "2026-10-08T14:48:00+09:00",
-    severity: "medium",
+    severity: "large",
     estimatedAreaM2: 45,
     buildingType: "1층 상가 (기름집)",
     casualtiesReported: false,

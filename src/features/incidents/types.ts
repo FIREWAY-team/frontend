@@ -38,6 +38,25 @@ export interface Incident {
   /** ISO8601 (KST). BE 는 `LocalDateTime` 을 문자열로 직렬화. */
   receivedAt: string;
   closedAt: string | null;
+  /**
+   * 접수 상세 (BE #41, 2026-10-08 머지 예정).
+   * ⚠️ **BE 머지 전에는 undefined** · 매퍼가 응답에 필드가 있을 때만 세팅.
+   */
+  intake?: IncidentIntake;
+}
+
+/**
+ * 신고 접수 상세 (BE `/api/incidents` 응답·요청 공용).
+ * ⚠️ 전 필드 optional — BE 가 다 안 보내도 UI 는 '미확인' 폴백.
+ */
+export interface IncidentIntake {
+  reporterName?: string;
+  reporterPhone?: string;
+  severity?: "small" | "medium" | "large";
+  estimatedAreaM2?: number;
+  buildingType?: string;
+  casualtiesReported?: boolean;
+  notes?: string;
 }
 
 /** POST 요청 body — 클라이언트에서 BFF 로 보낼 때 camel · BFF 가 snake 로 변환. */
@@ -46,6 +65,12 @@ export interface CreateIncidentRequest {
   lat: number;
   lon: number;
   summary?: string;
+  intake?: IncidentIntake;
+}
+
+/** PATCH status 요청 body. */
+export interface PatchIncidentStatusRequest {
+  status: IncidentStatus;
 }
 
 /**
