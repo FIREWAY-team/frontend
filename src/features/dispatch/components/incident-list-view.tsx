@@ -17,9 +17,11 @@ interface IncidentListViewProps {
  *
  * ⚠️ **기존 `DispatchView` 를 대체** · 지도·차량선택·경로결정 UI 는 상황 브리핑으로 이전됨.
  *    상황실은 "들어온 신고 리스트" 역할만 담당.
- * ⚠️ **합법적 테스트용 신고 받기 버튼** · 실제 소방 CAD 연동 전까지 심사·발표에서 "신고가
- *    들어오는 느낌" 을 시각화하기 위한 클라이언트 사이드 버튼. BE 호출 없이 로컬 상태에 추가.
- *    (버튼 라벨에 "테스트용" 명시로 심사 투명성 유지)
+ * ⚠️ **신고 받기 버튼 (§D6)** · 로컬 state 에 즉시 꽂아 반응성 확보 (optimistic UI) ·
+ *    백그라운드로 `POST /api/incidents` 호출해 BE DB 에 저장. 라벨에 '테스트용' 유지
+ *    (심사 투명성 · §CLAUDE.md 정직성).
+ * ⚠️ **BE 접수 실패해도 UI 는 유지** · 사용자는 카드가 뜬 걸 보고 상황 브리핑으로 넘어감.
+ *    BE 가 열리는 시점부터 자동으로 실 데이터 접수가 됨.
  * ⚠️ **빈 상태** · 이미 접수된 신고가 없으면 안내 문구. 테스트 버튼 안내도 함께.
  */
 export function IncidentListView({ initialIncidents }: IncidentListViewProps) {
@@ -29,17 +31,48 @@ export function IncidentListView({ initialIncidents }: IncidentListViewProps) {
   const handleReceiveTest = useCallback(() => {
     if (TEST_INCIDENT_POOL.length === 0) return;
     const next = TEST_INCIDENT_POOL[poolIndex % TEST_INCIDENT_POOL.length]!;
+    const nowIso = new Date().toISOString();
+
+    // 즉시 로컬 state 에 꽂음 (optimistic UI)
     setIncidents((prev) => {
-      // 동일 id 중복 방지 · 이미 리스트에 있으면 skip
       if (prev.some((it) => it.id === next.id)) return prev;
-      // 접수 시각을 지금으로 덮어 "방금 접수된 느낌" 연출
       const freshened: Scenario = {
         ...next,
-        intake: next.intake ? { ...next.intake, reportedAt: new Date().toISOString() } : undefined,
+        intake: next.intake ? { ...next.intake, reportedAt: nowIso } : undefined,
       };
       return [freshened, ...prev];
     });
     setPoolIndex((i) => i + 1);
+
+    // 백그라운드로 BE 접수 시도 (§D6). 실패해도 조용히 폴백 — UI 는 이미 노출됨.
+    void (async () => {
+      try {
+        await fetch("/api/incidents", {
+          method: "POST",
+          cache: "no-store",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            address: next.address ?? "주소 미상",
+            lat: next.location.lat,
+            lon: next.location.lon,
+            summary: next.title,
+            intake: next.intake
+              ? {
+                  reporterName: next.intake.reporterName,
+                  reporterPhone: next.intake.reporterPhone,
+                  severity: next.intake.severity,
+                  estimatedAreaM2: next.intake.estimatedAreaM2,
+                  buildingType: next.intake.buildingType,
+                  casualtiesReported: next.intake.casualtiesReported,
+                  notes: next.intake.notes,
+                }
+              : undefined,
+          }),
+        });
+      } catch {
+        /* 조용히 폴백 · 낙관적 카드는 그대로 유지 */
+      }
+    })();
   }, [poolIndex]);
 
   return (
