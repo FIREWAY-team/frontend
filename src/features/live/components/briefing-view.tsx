@@ -64,7 +64,10 @@ export function BriefingView({ incidents }: BriefingViewProps) {
 
 function BriefingContent({ incident }: { incident: Scenario }) {
   const router = useRouter();
-  const [routeData, setRouteData] = useState<RouteCandidate | null>(null);
+  // ⚠️ **차량별 라우팅은 BFF 프로파일이 처리** (§#54) · 차량마다 /api/route 를 Promise.all 로
+  //    병렬 호출. BFF `VEHICLE_ROUTE_PROFILE` 이 소형 a21 · 대형 a41·a1 경유지로 OSRM 실도로
+  //    경로를 뽑아주므로 각 차량은 서로 다른 polyline 을 받는다.
+  const [routesByVehicle, setRoutesByVehicle] = useState<Record<string, RouteCandidate | null>>({});
   const [routeLoading, setRouteLoading] = useState(true);
   const [dispatched, setDispatched] = useState(false);
   const [progress, setProgress] = useState(0); // 0~1
@@ -77,32 +80,37 @@ function BriefingContent({ incident }: { incident: Scenario }) {
     [incident.intake?.severity],
   );
 
-  // 1. 경로 조회 · incident 이 바뀔 때마다 재조회 (가장 큰 차량 기준으로 한 번만 호출)
+  // 1. 차량별 경로 병렬 조회 · Promise.all 로 동시에 보내 1회 호출과 응답 시간 거의 같다.
   //    ⚠️ setState 를 effect 안에서 직접 호출하지 않도록 microtask 로 밀어낸다
   useEffect(() => {
     let alive = true;
-    const biggest = assignedVehicles[assignedVehicles.length - 1] ?? "pump-3.5";
     void Promise.resolve().then(async () => {
       if (!alive) return;
       setRouteLoading(true);
-      setRouteData(null);
+      setRoutesByVehicle({});
       try {
-        const res = await fetch("/api/route", {
-          method: "POST",
-          cache: "no-store",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            vehicleId: biggest,
-            from: FIRE_STATION,
-            to: incident.location,
-            k: 1,
+        const results = await Promise.all(
+          assignedVehicles.map(async (vid) => {
+            const res = await fetch("/api/route", {
+              method: "POST",
+              cache: "no-store",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                vehicleId: vid,
+                from: FIRE_STATION,
+                to: incident.location,
+                k: 1,
+              }),
+            });
+            if (!res.ok) return [vid, null] as const;
+            const list = (await res.json()) as RouteCandidate[];
+            return [vid, list[0] ?? null] as const;
           }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const list = (await res.json()) as RouteCandidate[];
-        if (alive) setRouteData(list[0] ?? null);
+        );
+        if (!alive) return;
+        setRoutesByVehicle(Object.fromEntries(results));
       } catch {
-        if (alive) setRouteData(null);
+        if (alive) setRoutesByVehicle({});
       } finally {
         if (alive) setRouteLoading(false);
       }
@@ -112,14 +120,21 @@ function BriefingContent({ incident }: { incident: Scenario }) {
     };
   }, [incident, assignedVehicles]);
 
+  // 적어도 하나의 route 가 로드됐는지 (헤더·사이드바 분기용)
+  const anyRouteLoaded = useMemo(
+    () => Object.values(routesByVehicle).some((r) => r !== null),
+    [routesByVehicle],
+  );
+
   // 2. 재탐색 trigger · 대형 포함되고 · 애니메이션 40% 지점 지나면 1회
-  //    ⚠️ setState 를 effect 안에서 직접 호출하지 않도록 microtask 로 밀어낸다
-  //       (§ react-hooks/set-state-in-effect 규칙)
+  //    ⚠️ 지금은 좌표 shift 트릭 · Deathmatch.tsx 수신 후 Remotion 방식으로 교체 예정 (§C7)
   useEffect(() => {
-    if (!dispatched || rerouteFired || !routeData) return;
+    if (!dispatched || rerouteFired) return;
     if (!assignedVehicles.includes("pump-15")) return;
     if (progress < REROUTE_TRIGGER_RATIO) return;
-    const original = routeData.coordinates;
+    const largeRoute = routesByVehicle["pump-15"];
+    if (!largeRoute) return;
+    const original = largeRoute.coordinates;
     if (original.length < 4) return;
     const mid = Math.floor(original.length / 2);
     const detour: Array<[number, number]> = original.map(([lon, lat], i) => {
@@ -132,12 +147,12 @@ function BriefingContent({ incident }: { incident: Scenario }) {
       setRerouteFired(true);
       setReroutedPath(detour);
     });
-  }, [progress, dispatched, rerouteFired, routeData, assignedVehicles]);
+  }, [progress, dispatched, rerouteFired, routesByVehicle, assignedVehicles]);
 
   // 3. 애니메이션 tick
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startDispatch = useCallback(() => {
-    if (dispatched || !routeData) return;
+    if (dispatched || !anyRouteLoaded) return;
     setDispatched(true);
     const started = Date.now();
     timerRef.current = setInterval(() => {
@@ -149,7 +164,7 @@ function BriefingContent({ incident }: { incident: Scenario }) {
         timerRef.current = null;
       }
     }, ANIMATION_TICK_MS);
-  }, [dispatched, routeData]);
+  }, [dispatched, anyRouteLoaded]);
 
   useEffect(
     () => () => {
@@ -158,26 +173,21 @@ function BriefingContent({ incident }: { incident: Scenario }) {
     [],
   );
 
-  // 재탐색 발생 후 대형 펌프차의 "진행 비율" 을 원본보다 느리게 (우회로 시간 더 걸림)
-  // 시각적 효과 · 다른 차량은 원본 경로 그대로
-  // ⚠️ 차량별 polyline 이 완전히 겹쳐 1 색만 보이던 문제 (§#50) 해결 · 각 차량 경로를
-  //    lat 방향으로 ~9m 평행 오프셋 → 지도에서 3 차선처럼 나란히 보인다. 마커도 같은
-  //    오프셋을 받아야 폴리라인 위에 올라앉는다.
+  // 차량별 위치 샘플링 · 각 차량이 자기 polyline 위를 progress 비율대로 이동.
+  // 소형이 조금 빠르다는 가정 (speedBias) 은 유지 — 영상에서 "소형 먼저 도착" 메시지.
   const vehiclePositions = useMemo(() => {
-    if (!routeData) return [] as Array<{ id: string; lat: number; lon: number }>;
     const result: Array<{ id: string; lat: number; lon: number }> = [];
     for (const vid of assignedVehicles) {
-      // 차량별로 약간 다른 progress 시뮬레이션 · 소형이 가장 빠르다는 가정
+      const route = routesByVehicle[vid];
+      if (!route) continue;
       const speedBias = vid === "pump-3.5" ? 1.08 : vid === "pump-8" ? 1.0 : 0.92;
       const effectiveProgress = Math.min(1, progress * speedBias);
-      const base = vid === "pump-15" && reroutedPath ? reroutedPath : routeData.coordinates;
-      const idx = assignedVehicles.indexOf(vid);
-      const path = offsetPath(base, idx, assignedVehicles.length);
+      const path = vid === "pump-15" && reroutedPath ? reroutedPath : route.coordinates;
       const pt = sampleAlongPath(path, effectiveProgress);
       if (pt) result.push({ id: vid, lat: pt[1], lon: pt[0] });
     }
     return result;
-  }, [routeData, progress, reroutedPath, assignedVehicles]);
+  }, [routesByVehicle, progress, reroutedPath, assignedVehicles]);
 
   // 도착 100m 이내 차량 (CCTV 자동 노출용)
   const nearArrival = useMemo(() => {
@@ -250,23 +260,22 @@ function BriefingContent({ incident }: { incident: Scenario }) {
             position={{ lat: incident.location.lat, lng: incident.location.lon }}
             title={incident.title}
           />
-          {/* 메인 경로 polyline (차량별 색상 · lat 오프셋으로 평행선처럼 분리 §#50) */}
-          {routeData &&
-            visibleVehicles.map((vid) => {
-              const base = vid === "pump-15" && reroutedPath ? reroutedPath : routeData.coordinates;
-              const offsetIdx = assignedVehicles.indexOf(vid);
-              const path = offsetPath(base, offsetIdx, assignedVehicles.length);
-              return (
-                <Polyline
-                  key={vid}
-                  path={path.map(([lon, lat]) => ({ lat, lng: lon }))}
-                  strokeWeight={5}
-                  strokeColor={VEHICLE_COLOR[vid] ?? "#64748b"}
-                  strokeOpacity={0.9}
-                  strokeStyle={vid === "pump-15" && reroutedPath ? "dash" : "solid"}
-                />
-              );
-            })}
+          {/* 메인 경로 polyline · 차량마다 자기 BFF 프로파일 경로 (§#54) */}
+          {visibleVehicles.map((vid) => {
+            const route = routesByVehicle[vid];
+            if (!route) return null;
+            const path = vid === "pump-15" && reroutedPath ? reroutedPath : route.coordinates;
+            return (
+              <Polyline
+                key={vid}
+                path={path.map(([lon, lat]) => ({ lat, lng: lon }))}
+                strokeWeight={5}
+                strokeColor={VEHICLE_COLOR[vid] ?? "#64748b"}
+                strokeOpacity={0.9}
+                strokeStyle={vid === "pump-15" && reroutedPath ? "dash" : "solid"}
+              />
+            );
+          })}
           {/* 차량 Marker · 출동 후 애니메이션 중 */}
           {dispatched &&
             vehiclePositions
@@ -305,7 +314,7 @@ function BriefingContent({ incident }: { incident: Scenario }) {
         <aside className="border-border bg-surface/95 absolute top-4 right-4 bottom-4 z-10 w-80 overflow-y-auto rounded-lg border p-4 shadow-xl backdrop-blur">
           <BriefingSidebar
             incident={incident}
-            routeData={routeData}
+            routesByVehicle={routesByVehicle}
             routeLoading={routeLoading}
             assignedVehicles={assignedVehicles}
             dispatched={dispatched}
@@ -322,7 +331,7 @@ function BriefingContent({ incident }: { incident: Scenario }) {
 
 function BriefingSidebar({
   incident,
-  routeData,
+  routesByVehicle,
   routeLoading,
   assignedVehicles,
   dispatched,
@@ -330,13 +339,23 @@ function BriefingSidebar({
   onDispatch,
 }: {
   incident: Scenario;
-  routeData: RouteCandidate | null;
+  routesByVehicle: Record<string, RouteCandidate | null>;
   routeLoading: boolean;
   assignedVehicles: string[];
   dispatched: boolean;
   progress: number;
   onDispatch: () => void;
 }) {
+  const anyRoute = assignedVehicles.some((vid) => routesByVehicle[vid]);
+  // 첫 번째 로드된 route 의 explanation 을 공통 근거로 노출 (차량별로 거의 동일)
+  const primaryExplanation = useMemo(() => {
+    for (const vid of assignedVehicles) {
+      const r = routesByVehicle[vid];
+      if (r?.explanation) return r.explanation;
+    }
+    return "";
+  }, [routesByVehicle, assignedVehicles]);
+
   return (
     <div className="flex flex-col gap-3">
       <header className="flex flex-col gap-1">
@@ -350,38 +369,42 @@ function BriefingSidebar({
         <p className="text-muted-foreground py-3 text-[12px]">AI 분석 중 · 경로 조회…</p>
       )}
 
-      {!routeLoading && !routeData && (
+      {!routeLoading && !anyRoute && (
         <p className="text-danger text-[12px]">
           경로를 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.
         </p>
       )}
 
-      {routeData && (
+      {anyRoute && (
         <>
           <section className="flex flex-col gap-1.5">
             <div className="text-muted-foreground text-[10.5px] tracking-widest uppercase">
               배정 차량 ({assignedVehicles.length}대)
             </div>
-            {assignedVehicles.map((vid) => (
-              <div
-                key={vid}
-                className="border-border bg-background flex items-center justify-between gap-2 rounded border px-2.5 py-1.5"
-              >
-                <div className="flex items-center gap-2">
-                  <span
-                    className="h-2.5 w-2.5 rounded-full"
-                    style={{ backgroundColor: VEHICLE_COLOR[vid] }}
-                  />
-                  <span className="text-foreground text-[12px] font-medium">
-                    {VEHICLE_LABEL[vid] ?? vid}
-                  </span>
+            {assignedVehicles.map((vid) => {
+              const route = routesByVehicle[vid];
+              return (
+                <div
+                  key={vid}
+                  className="border-border bg-background flex items-center justify-between gap-2 rounded border px-2.5 py-1.5"
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: VEHICLE_COLOR[vid] }}
+                    />
+                    <span className="text-foreground text-[12px] font-medium">
+                      {VEHICLE_LABEL[vid] ?? vid}
+                    </span>
+                  </div>
+                  <div className="text-muted-foreground text-[10.5px]">
+                    {route
+                      ? `${Math.floor(route.etaSec / 60)}분 ${route.etaSec % 60}초 · ${(route.distanceM / 1000).toFixed(2)}km`
+                      : "경로 없음"}
+                  </div>
                 </div>
-                <div className="text-muted-foreground text-[10.5px]">
-                  {Math.floor(routeData.etaSec / 60)}분 {routeData.etaSec % 60}초 ·{" "}
-                  {(routeData.distanceM / 1000).toFixed(2)}km
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </section>
 
           {!dispatched ? (
@@ -414,9 +437,9 @@ function BriefingSidebar({
             </section>
           )}
 
-          {routeData.explanation && (
+          {primaryExplanation && (
             <div className="text-muted-foreground border-border/60 border-t pt-2 text-[11px]">
-              {routeData.explanation}
+              {primaryExplanation}
             </div>
           )}
         </>
@@ -508,28 +531,6 @@ function EmptyState({ onBack }: { onBack: () => void }) {
 
 // ──────────────────────────────────────────────────────────────
 // 유틸
-
-/**
- * 차량별 polyline 평행 오프셋 (§#50).
- *
- * BE 가 아직 차량별 라우팅을 돌려주지 않아 FE 가 단일 경로를 공유해 색상만 다르게 그리는데,
- * 좌표가 완전히 같으면 가장 위에 그려진 색만 보인다. lat 를 미세하게 평행 이동해 지도에서
- * 3 차선처럼 나란히 보이게 한다.
- *
- * 지도 레벨 5 (약 500m 가시 폭) 기준 ~9m 간격이 가장 자연스러움 — 더 크게 하면 경로가
- * 실제 도로를 벗어나 보인다. true-perpendicular 가 아니라 단순 lat 평행 이동이지만
- * 심사 영상 축척에서는 평행선처럼 보여 충분하다.
- */
-function offsetPath(
-  path: Array<[number, number]>,
-  index: number,
-  total: number,
-): Array<[number, number]> {
-  if (total <= 1) return path;
-  const BASE_OFFSET_DEG = 0.00008; // 약 9m
-  const shift = (index - (total - 1) / 2) * BASE_OFFSET_DEG;
-  return path.map(([lon, lat]) => [lon, lat + shift]);
-}
 
 function sampleAlongPath(path: Array<[number, number]>, t: number): [number, number] | null {
   if (path.length === 0) return null;
