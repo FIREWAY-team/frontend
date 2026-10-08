@@ -1,9 +1,11 @@
+import { withIntake } from "./intake-overrides";
 import type { Scenario } from "./types";
 
 /**
- * BE `/api/scenarios` 응답 항목 shape (`chore/domain-scaffold` 브랜치 · 2026-09-08 확인).
+ * BE `/api/scenarios` 응답 항목 shape (2026-10-08 재확인 · BE Scenario 도메인 그대로).
  * ⚠️ **snake_case**. Jackson 세팅으로 이 이름 그대로 내려온다.
- * ⚠️ 미검증 · BE `main` 병합 후 재확인. 필드 삭제·추가가 있을 수 있다.
+ * ⚠️ **intake 상세 (신고자·연락처·접수시각 등) 는 BE 에 없음** — FE `intake-overrides.ts` 에서
+ *    scenarioId 로 임시 매핑. BE 확장 시 매핑 제거.
  */
 export interface BeScenario {
   scenario_id: string;
@@ -16,19 +18,17 @@ export interface BeScenario {
 /**
  * BE 시나리오 → UI 계약.
  *
- * ⚠️ **`address` 없음** (§FE-BE 검증 리포트 §🔴). UI에서 좌표 폴백으로 처리 (`formatScenarioAddress`).
- * ⚠️ 좌표 평면(`fire_lat`·`fire_lon`) → 중첩(`location: {lat, lon}`) 변환. UI가 지도 API에
- *    전달할 때 나머지 필드와 분리해서 다루기 편하다.
+ * ⚠️ **`address` 없음** · UI에서 좌표 폴백으로 처리 (`formatScenarioAddress`).
+ * ⚠️ **`intake` 는 BE 미제공** · `withIntake` 가 id 매핑으로 보강 (fallback 포함).
  */
 export function toScenario(be: BeScenario): Scenario {
-  return {
+  return withIntake({
     id: be.scenario_id,
     title: be.title,
     location: { lat: be.fire_lat, lon: be.fire_lon },
     vehicleHint: be.vehicle_hint,
-    // BE는 `address`를 안 준다. 화면에서 좌표 폴백으로 채움.
     address: formatScenarioAddress(be.fire_lat, be.fire_lon),
-  };
+  });
 }
 
 /**

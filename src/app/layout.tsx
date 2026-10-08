@@ -31,7 +31,7 @@ export const metadata: Metadata = {
     template: "%s · FireLoad",
   },
   description:
-    "차종·CCTV 판독·정적 진입불가 데이터로 소방차가 실제 통과 가능한 골목만 골라 5분 안에 도착 경로를 낸다.",
+    "차종·CCTV 판독·차 폭에 따른 진입불가 데이터로 소방차가 실제 통과 가능한 골목만 골라 5분 안에 도착 경로를 낸다.",
   openGraph: {
     title: "FireLoad — 소방차 골목 통과가능 경로",
     description: "골목 단위 통과가능성 예측으로 골든타임을 지킵니다.",

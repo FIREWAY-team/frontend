@@ -50,18 +50,18 @@ export function OverlayToggles({
 
       <div>
         <div className="text-muted-foreground mb-1.5 px-1 text-[10.5px] font-medium tracking-widest uppercase">
-          오버레이
+          표시 항목
         </div>
         <div className="flex flex-col gap-1">
           <ToggleRow
-            label="정적 진입불가 (PDF)"
+            label="차 폭에 따른 진입불가 구역"
             hint="중원구청 19개 동 등재 구간"
             checked={showStaticNoGo}
             onChange={onToggleStatic}
           />
           <ToggleRow
             label="CCTV 판독 결과"
-            hint="배치 판독 · 신뢰도별 색"
+            hint="실시간 CCTV · 통과 가능성 색상 표시"
             checked={showCctvReading}
             onChange={onToggleCctv}
           />
