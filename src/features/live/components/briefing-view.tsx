@@ -215,7 +215,8 @@ function BriefingContent({ incident }: { incident: Scenario }) {
     for (const vid of assignedVehicles) {
       const route = routesByVehicle[vid];
       if (!route) continue;
-      const speedBias = vid === "pump-3.5" ? 1.08 : vid === "pump-8" ? 1.0 : 0.92;
+      // 같은 길로 가는 차량(중형·대형·굴절)이 한 점에 겹치지 않게 차량마다 속도를 조금씩 다르게.
+      const speedBias = SPEED_BIAS[vid] ?? 1.0;
       const effectiveProgress = Math.min(1, progress * speedBias);
       const pt = sampleAlongPath(route.coordinates, effectiveProgress);
       if (pt) result.push({ id: vid, lat: pt[1], lon: pt[0] });
@@ -324,7 +325,10 @@ function BriefingContent({ incident }: { incident: Scenario }) {
                   position={{ lat: v.lat, lng: v.lon }}
                   title={VEHICLE_LABEL[v.id] ?? v.id}
                   image={{
-                    src: makeVehicleIconDataUri(VEHICLE_COLOR[leaders[v.id] ?? v.id] ?? "#64748b"),
+                    src: makeVehicleIconDataUri(
+                      VEHICLE_COLOR[v.id] ?? "#64748b",
+                      VEHICLE_SHORT[v.id]?.[0] ?? "?",
+                    ),
                     size: { width: 30, height: 30 },
                     options: { offset: { x: 15, y: 15 } },
                   }}
@@ -433,14 +437,22 @@ function BriefingSidebar({
                 >
                   <div className="flex items-center gap-2">
                     <span
-                      className="h-2.5 w-2.5 rounded-full"
-                      style={{ backgroundColor: VEHICLE_COLOR[leaders[vid] ?? vid] }}
-                    />
+                      className="flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold text-white"
+                      style={{ backgroundColor: VEHICLE_COLOR[vid] }}
+                    >
+                      {VEHICLE_SHORT[vid]?.[0]}
+                    </span>
                     <span className="text-foreground text-[12px] font-medium">
                       {VEHICLE_LABEL[vid] ?? vid}
                     </span>
                   </div>
-                  <div className="text-muted-foreground text-[10.5px]">
+                  <div className="text-muted-foreground flex items-center gap-1.5 text-[10.5px]">
+                    {/* 지도에서 이 차량이 따라가는 선 색 · 같은 길이면 같은 색 */}
+                    <span
+                      className="h-1 w-3 rounded-full"
+                      title="지도 경로 색"
+                      style={{ backgroundColor: VEHICLE_COLOR[leaders[vid] ?? vid] }}
+                    />
                     {route
                       ? `${Math.floor(route.etaSec / 60)}분 ${route.etaSec % 60}초 · ${(route.distanceM / 1000).toFixed(2)}km`
                       : "경로 없음"}
@@ -783,11 +795,18 @@ function haversineM(lat1: number, lon1: number, lat2: number, lon2: number): num
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function makeVehicleIconDataUri(color: string): string {
-  // 간단한 소방차 아이콘 SVG · 색상만 변경
+const SPEED_BIAS: Record<string, number> = {
+  "pump-3.5": 1.08,
+  "pump-8": 1.0,
+  "pump-15": 0.94,
+  "aerial-25": 0.88,
+};
+
+function makeVehicleIconDataUri(color: string, label: string): string {
+  // 차량 고유색 원 + 차종 글자(소·중·대·굴). 같은 선 위에서도 차량을 구분하게 한다.
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 30 30'>
     <circle cx='15' cy='15' r='13' fill='${color}' stroke='white' stroke-width='2'/>
-    <text x='15' y='20' font-size='14' font-weight='bold' text-anchor='middle' fill='white'>🚒</text>
+    <text x='15' y='20' font-size='13' font-weight='bold' text-anchor='middle' fill='white' font-family='sans-serif'>${label}</text>
   </svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
