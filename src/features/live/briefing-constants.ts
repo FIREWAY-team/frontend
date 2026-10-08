@@ -101,3 +101,27 @@ export const REROUTE_TRIGGER_RATIO = 0.4;
 
 /** 도착지 CCTV 를 노출하는 거리 (m). · 각 차량이 이 거리 안에 들어오면 자동 표시. */
 export const ARRIVAL_CCTV_RADIUS_M = 100;
+
+/** 같은 도로를 나란히 달리는 차량 선 사이 간격 (m). 지도 level 5 에서 선 두께 4px 가 겹치지 않을 만큼. */
+export const LANE_GAP_M = 7;
+
+/**
+ * 경로를 진행 방향 오른쪽으로 `offsetM` 만큼 평행 이동한 좌표 ([lon, lat]).
+ * 같은 길로 가는 차량을 한 선으로 합치지 않고 차량별 색 선을 나란히 그리는 데 쓴다 (노선도 방식).
+ */
+export function lanePath(
+  coords: ReadonlyArray<readonly [number, number]>,
+  offsetM: number,
+): Array<[number, number]> {
+  if (offsetM === 0 || coords.length < 2) return coords.map(([x, y]) => [x, y]);
+  return coords.map(([lon, lat], i) => {
+    const [ax, ay] = coords[Math.max(0, i - 1)]!;
+    const [bx, by] = coords[Math.min(coords.length - 1, i + 1)]!;
+    const mPerLon = 111_320 * Math.cos((lat * Math.PI) / 180);
+    const dx = (bx - ax) * mPerLon;
+    const dy = (by - ay) * 111_320;
+    const len = Math.hypot(dx, dy) || 1;
+    // 진행 방향 (dx, dy) 의 오른쪽 법선은 (dy, -dx).
+    return [lon + ((dy / len) * offsetM) / mPerLon, lat + ((-dx / len) * offsetM) / 111_320];
+  });
+}

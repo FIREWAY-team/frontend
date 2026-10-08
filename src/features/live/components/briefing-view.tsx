@@ -19,6 +19,8 @@ import {
   ANIMATION_TICK_MS,
   ANIMATION_TOTAL_MS,
   ARRIVAL_CCTV_RADIUS_M,
+  LANE_GAP_M,
+  lanePath,
   REROUTE_TRIGGER_RATIO,
   routeLeaders,
   VEHICLE_COLOR,
@@ -236,8 +238,6 @@ function BriefingContent({ incident }: { incident: Scenario }) {
 
   const visibleVehicles =
     viewTab === "all" ? assignedVehicles : assignedVehicles.filter((v) => v === viewTab);
-  // 지도 선은 묶음 대표 기준 · 중형 탭을 골라도 중형이 속한 대형 묶음 선이 보인다.
-  const visibleLeaders = [...new Set(visibleVehicles.map((v) => leaders[v] ?? v))];
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
@@ -300,21 +300,13 @@ function BriefingContent({ incident }: { incident: Scenario }) {
           {/* 메인 경로 polyline (§C7 Remotion Deathmatch 패턴).
               재탐색 전: 소형 경로 하나만 그린다 (대형이 그 위에 있는 것처럼).
               재탐색 후: 소형 꼬리 회색 점선 (대형이 못 가는 길) + 소형 전체 파랑 + 대형 전체 빨강. */}
-          {!rerouteFired &&
-            // 재탐색 전 · 소형 polyline 만 (두 차량 공유 중). visibleVehicles 가 소형을 포함할 때만.
-            (visibleLeaders.includes("pump-3.5") && routesByVehicle["pump-3.5"] ? (
-              <Polyline
-                path={routesByVehicle["pump-3.5"]!.coordinates.map(([lon, lat]) => ({
-                  lat,
-                  lng: lon,
-                }))}
-                strokeWeight={5}
-                strokeColor={VEHICLE_COLOR["pump-3.5"]}
-                strokeOpacity={0.9}
-                strokeStyle="solid"
-              />
-            ) : null)}
-          {rerouteFired && renderReroutePolylines(routesByVehicle, visibleLeaders, commonPrefix)}
+          {renderVehicleLanes(
+            routesByVehicle,
+            visibleVehicles,
+            leaders,
+            commonPrefix,
+            rerouteFired,
+          )}
           {/* 차량 Marker · 출동 후 애니메이션 중 */}
           {dispatched &&
             vehiclePositions
@@ -361,7 +353,6 @@ function BriefingContent({ incident }: { incident: Scenario }) {
             routesByVehicle={routesByVehicle}
             routeLoading={routeLoading}
             assignedVehicles={assignedVehicles}
-            leaders={leaders}
             dispatched={dispatched}
             progress={progress}
             onDispatch={startDispatch}
@@ -379,7 +370,6 @@ function BriefingSidebar({
   routesByVehicle,
   routeLoading,
   assignedVehicles,
-  leaders,
   dispatched,
   progress,
   onDispatch,
@@ -388,7 +378,6 @@ function BriefingSidebar({
   routesByVehicle: Record<string, RouteCandidate | null>;
   routeLoading: boolean;
   assignedVehicles: string[];
-  leaders: Record<string, string>;
   dispatched: boolean;
   progress: number;
   onDispatch: () => void;
@@ -447,12 +436,6 @@ function BriefingSidebar({
                     </span>
                   </div>
                   <div className="text-muted-foreground flex items-center gap-1.5 text-[10.5px]">
-                    {/* 지도에서 이 차량이 따라가는 선 색 · 같은 길이면 같은 색 */}
-                    <span
-                      className="h-1 w-3 rounded-full"
-                      title="지도 경로 색"
-                      style={{ backgroundColor: VEHICLE_COLOR[leaders[vid] ?? vid] }}
-                    />
                     {route
                       ? `${Math.floor(route.etaSec / 60)}분 ${route.etaSec % 60}초 · ${(route.distanceM / 1000).toFixed(2)}km`
                       : "경로 없음"}
@@ -712,31 +695,28 @@ function EmptyState({ onBack }: { onBack: () => void }) {
 // 유틸
 
 /**
- * 재탐색 발동 후 polyline 레이어 (§C7 Deathmatch 패턴).
+ * 차량별 경로 선 · 차량마다 고유색, 같은 도로를 함께 가면 나란히 (노선도 방식).
  *
- * 아래부터 순서대로:
- *  1. 소형 꼬리 (`small.slice(PREFIX-1)`) — 회색 점선 · 대형이 못 가는 공유 분기 이후 구간
- *  2. 대형 전체 (`large`) — 빨강 · 공유 접두사 + 대형 자기 경로
- *  3. 소형 전체 (`small`) — 파랑 · 공유 접두사 위에 올라가 "통행 가능" 느낌을 덮어씀
- *
- * visibleVehicles 가 특정 차량만 포함하면 그 차량 관련 레이어만 보인다 (탭 전환 대응).
+ * - 재탐색 전: 전 차량이 소형 경로(최단경로)를 함께 간다 → 소형 경로 위에 차량 수만큼 평행선.
+ * - 재탐색 후: 소형은 자기 경로, 나머지는 묶음 대표(대형) 경로. 소형 경로의 분기 이후 구간은
+ *   회색 점선으로 남겨 "못 가는 길" 을 보여준다 (§C7 Deathmatch 패턴).
+ * 차선 번호는 보이는 차량 기준으로 가운데 정렬 → 공통 구간에서도 선이 겹치지 않는다.
  */
-function renderReroutePolylines(
+function renderVehicleLanes(
   routes: Record<string, RouteCandidate | null>,
   visible: string[],
+  leaders: Record<string, string>,
   prefix: number,
+  rerouted: boolean,
 ): React.ReactNode {
   const small = routes["pump-3.5"]?.coordinates;
-  const large = routes["pump-15"]?.coordinates;
-  if (!small || !large) return null;
-  const safePrefix = Math.max(1, Math.min(prefix, small.length, large.length));
-  const blockedTail = small.slice(safePrefix - 1);
-  const showSmall = visible.includes("pump-3.5");
-  const showLarge = visible.includes("pump-15");
+  const center = (visible.length - 1) / 2;
+  const others = visible.some((v) => (leaders[v] ?? v) !== "pump-3.5");
+  const blockedTail =
+    rerouted && small && others ? small.slice(Math.max(1, Math.min(prefix, small.length)) - 1) : [];
   return (
     <>
-      {/* 1. 소형 꼬리 회색 점선 (대형 입장에서 '막힌 길' 표시) · 대형 뷰에서만 */}
-      {showLarge && blockedTail.length > 1 && (
+      {blockedTail.length > 1 && (
         <Polyline
           path={blockedTail.map(([lon, lat]) => ({ lat, lng: lon }))}
           strokeWeight={6}
@@ -745,26 +725,25 @@ function renderReroutePolylines(
           strokeStyle="shortdash"
         />
       )}
-      {/* 2. 대형 전체 (빨강) */}
-      {showLarge && (
-        <Polyline
-          path={large.map(([lon, lat]) => ({ lat, lng: lon }))}
-          strokeWeight={5}
-          strokeColor={VEHICLE_COLOR["pump-15"]}
-          strokeOpacity={0.9}
-          strokeStyle="solid"
-        />
-      )}
-      {/* 3. 소형 전체 (파랑) · 공유 접두사 위에 덮여서 그 구간은 파랑으로 보임 */}
-      {showSmall && (
-        <Polyline
-          path={small.map(([lon, lat]) => ({ lat, lng: lon }))}
-          strokeWeight={5}
-          strokeColor={VEHICLE_COLOR["pump-3.5"]}
-          strokeOpacity={0.9}
-          strokeStyle="solid"
-        />
-      )}
+      {visible.map((vid, lane) => {
+        const base = rerouted
+          ? routes[leaders[vid] ?? vid]?.coordinates
+          : (small ?? routes[vid]?.coordinates);
+        if (!base) return null;
+        return (
+          <Polyline
+            key={vid}
+            path={lanePath(base, (lane - center) * LANE_GAP_M).map(([lon, lat]) => ({
+              lat,
+              lng: lon,
+            }))}
+            strokeWeight={4}
+            strokeColor={VEHICLE_COLOR[vid] ?? "#64748b"}
+            strokeOpacity={0.95}
+            strokeStyle="solid"
+          />
+        );
+      })}
     </>
   );
 }
