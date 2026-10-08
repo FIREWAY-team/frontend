@@ -26,9 +26,7 @@ export default async function VehiclesPage() {
               성남소방서 · 관할 펌프차 {result.data.length}대
             </p>
           </div>
-          <div className="text-muted-foreground text-[11px]">
-            등록·수정은 관리자 콘솔 (본선 이후)
-          </div>
+          <div className="text-muted-foreground text-[11px]">차량 등록·수정은 관리자 권한 전용</div>
         </div>
         <VehicleList vehicles={result.data} />
       </div>

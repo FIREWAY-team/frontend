@@ -154,3 +154,7 @@ tsconfig.tsbuildinfo
 # IDE
 .idea/
 .vscode/
+
+# Local development only
+.claude/
+

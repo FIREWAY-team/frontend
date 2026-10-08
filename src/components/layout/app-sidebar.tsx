@@ -15,8 +15,8 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { href: "/live", label: "라이브 브리핑", icon: Play },
   { href: "/dispatch", label: "상황실", icon: LayoutDashboard },
+  { href: "/live", label: "상황 브리핑", icon: Play },
   { href: "/map", label: "관할 지도", icon: MapPinned },
   { href: "/vehicles", label: "차량 관리", icon: Truck },
 ];
