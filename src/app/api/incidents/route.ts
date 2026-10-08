@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { createIncident, listIncidents } from "@/features/incidents/api";
-import type { CreateIncidentRequest, IncidentStatus } from "@/features/incidents/types";
+import type {
+  CreateIncidentRequest,
+  IncidentIntake,
+  IncidentStatus,
+} from "@/features/incidents/types";
 import { INCIDENT_STATUS } from "@/features/incidents/types";
 
 /**
@@ -66,7 +70,38 @@ function parseCreateIncident(raw: unknown): CreateIncidentRequest | null {
   if (typeof r.lon !== "number" || Number.isNaN(r.lon)) return null;
   const req: CreateIncidentRequest = { address: r.address.trim(), lat: r.lat, lon: r.lon };
   if (typeof r.summary === "string" && r.summary.trim() !== "") req.summary = r.summary.trim();
+  const intake = parseIntake(r.intake);
+  if (intake) req.intake = intake;
   return req;
+}
+
+/** BE #41 intake 필드 수집 (선택 전부). 하나도 없으면 undefined. */
+function parseIntake(raw: unknown): IncidentIntake | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const intake: IncidentIntake = {};
+  if (typeof r.reporterName === "string" && r.reporterName.trim() !== "") {
+    intake.reporterName = r.reporterName.trim();
+  }
+  if (typeof r.reporterPhone === "string" && r.reporterPhone.trim() !== "") {
+    intake.reporterPhone = r.reporterPhone.trim();
+  }
+  if (r.severity === "small" || r.severity === "medium" || r.severity === "large") {
+    intake.severity = r.severity;
+  }
+  if (typeof r.estimatedAreaM2 === "number" && Number.isFinite(r.estimatedAreaM2)) {
+    intake.estimatedAreaM2 = r.estimatedAreaM2;
+  }
+  if (typeof r.buildingType === "string" && r.buildingType.trim() !== "") {
+    intake.buildingType = r.buildingType.trim();
+  }
+  if (typeof r.casualtiesReported === "boolean") {
+    intake.casualtiesReported = r.casualtiesReported;
+  }
+  if (typeof r.notes === "string" && r.notes.trim() !== "") {
+    intake.notes = r.notes.trim();
+  }
+  return Object.keys(intake).length > 0 ? intake : undefined;
 }
 
 function parseStatus(raw: string): IncidentStatus | undefined {
